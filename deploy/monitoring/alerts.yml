@@ -1,0 +1,47 @@
+groups:
+  - name: unified-cctv
+    rules:
+      - alert: CameraOffline
+        expr: sum by (department) (uvp_cameras{status="offline"}) > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "{{ $value }} camera(s) offline in {{ $labels.department }} for 10 minutes"}
+      - alert: SourceUnreachable
+        expr: uvp_source_up == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "Departmental source {{ $labels.source }} unreachable"}
+      - alert: RelayDown
+        expr: uvp_relay_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "Relay {{ $labels.relay }} is down; cameras are being moved to other relays"}
+      - alert: ANPRStalled
+        expr: sum(rate(uvp_anpr_frames_total[5m])) == 0 and sum(uvp_anpr_stream_connected) > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "ANPR workers connected but processing no frames"}
+      - alert: ANPRSlow
+        expr: histogram_quantile(0.9, sum(rate(uvp_anpr_frame_seconds_bucket[5m])) by (le)) > 1.5
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "ANPR p90 frame time above 1.5 s: add a worker shard or a GPU"}
+      - alert: PullCapNearlyReached
+        expr: uvp_relay_pulls / uvp_relay_pull_cap > 0.9
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Source {{ $labels.source }} at 90% of its agreed stream cap"}
+      - alert: ArchiveBacklog
+        expr: uvp_archive_backlog > 500
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: "Archiver is falling behind ({{ $value }} events without clips)"}
+      - alert: NotificationFailures
+        expr: increase(uvp_notifications_total{status="failed"}[15m]) > 5
+        labels: {severity: warning}
+        annotations: {summary: "Notification channel {{ $labels.channel }} failing"}
+      - alert: APILatency
+        expr: histogram_quantile(0.95, sum(rate(uvp_http_request_seconds_bucket[5m])) by (le)) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "API p95 latency above 1 s"}

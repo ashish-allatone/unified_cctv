@@ -1,0 +1,15 @@
+{
+ "license": {
+  "customer": "Gujarat Police Innovation Challenge pilot",
+  "tenant": "gujarat-pilot",
+  "cameras": 100,
+  "anpr_channels": 30,
+  "analytics_channels": 30,
+  "features": [
+   "*"
+  ],
+  "expires": "2027-09-30",
+  "issued": "2026-09-25"
+ },
+ "signature": "wXyBWM1tlZpt/JwDj3+N1PcN04s8TvsMd4AkvTgZLn31RH7vEnvomRy5ZXLV3Xsed2uU5nFrIJzujJYDbWEeBg=="
+}

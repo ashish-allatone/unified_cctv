@@ -1,0 +1,26 @@
+# Simulated Municipal VMS video server (RTSP only, own credentials).
+logLevel: warn
+writeQueueSize: 4096
+rtspAddress: :28554
+rtpAddress: :28000
+rtcpAddress: :28001
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+api: yes
+apiAddress: 127.0.0.1:29997   # simulator-side stats, used by tests/test_non_interference.py
+authMethod: internal
+authInternalUsers:
+  - user: any
+    ips: ['127.0.0.1', '::1']
+    permissions: [{action: publish}, {action: api}]
+  - user: vms-live
+    pass: vms-live-secret
+    permissions: [{action: read}]
+pathDefaults:
+  runOnDemandCloseAfter: 10s
+paths:
+  "~^(muni-cam[0-9])/(main|sub)$":
+    runOnDemand: ffmpeg -loglevel error -re -stream_loop -1 -i ${MEDIA_DIR}/${G1}_${G2}.mp4 -c copy -f rtsp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+    runOnDemandRestart: yes

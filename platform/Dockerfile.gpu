@@ -1,0 +1,27 @@
+# GPU build for the ANPR / analytics workers: CUDA 12 runtime + onnxruntime-gpu.
+#   docker build -f platform/Dockerfile.gpu -t uvp/platform-gpu:0.1 .
+#   docker compose: image: uvp/platform-gpu:0.1, ANPR_GPU=1, deploy.resources.reservations.devices: [{capabilities: [gpu]}]
+# Needs the NVIDIA Container Toolkit on the host. A T4 handles ~40 ANPR channels at 5 fps per worker.
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg libgl1 libglib2.0-0 fonts-dejavu-core curl \
+    && rm -rf /var/lib/apt/lists/* && ln -sf /usr/bin/python3 /usr/bin/python
+WORKDIR /app
+COPY platform/requirements.txt /app/platform/requirements.txt
+RUN pip install --no-cache-dir -r /app/platform/requirements.txt && pip uninstall -y onnxruntime && pip install --no-cache-dir onnxruntime-gpu
+RUN python -c "from fast_alpr import ALPR; ALPR(detector_model='yolo-v9-t-384-license-plate-end2end', ocr_model='cct-s-v2-global-model')"
+COPY platform /app/platform
+# Bundled COCO detector (Apache-2.0). Fetched here only if the build context lacks it, so a copy made
+# without the .onnx still builds a working analytics worker.
+RUN test -f /app/platform/models/yolox_nano.onnx || (mkdir -p /app/platform/models && curl -fsSL -o /app/platform/models/yolox_nano.onnx \
+    https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx)
+# Face models (OpenCV Zoo, Apache-2.0): the SFace recogniser is 38 MB and may be absent from a copied tree.
+RUN test -f /app/platform/models/face_recognition_sface_2021dec.onnx || curl -fsSL -o /app/platform/models/face_recognition_sface_2021dec.onnx \
+    https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx
+RUN test -f /app/platform/models/face_detection_yunet_2023mar.onnx || curl -fsSL -o /app/platform/models/face_detection_yunet_2023mar.onnx \
+    https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+COPY config /app/config
+COPY scripts /app/scripts
+COPY VERSION /app/VERSION
+COPY deploy/licensing/vendor_public.pem /app/deploy/licensing/vendor_public.pem
+ENV PYTHONPATH=/app/platform UVP_ROOT=/app DATA_DIR=/data PYTHONUNBUFFERED=1 ANPR_GPU=1
+CMD ["python", "-m", "uvp.services.anpr_worker"]

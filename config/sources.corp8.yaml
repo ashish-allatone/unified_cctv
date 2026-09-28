@@ -1,0 +1,51 @@
+# Departmental sources the platform reads from. One entry per VMS / NVR.
+# Credentials come from environment variables (.env) - never write them here.
+# Keep the "sources:" line at the top: every entry is indented under it.
+# The two simulator departments (police, municipal) were removed. To demo again: docker compose --profile sim up -d
+# and restore their entries from config/sources.example.yaml.
+sources:
+  # Corp8 / Sentinel grid (Gujarat Police Innovation Challenge). The web portal and its cameras.json / HLS
+  # need a browser sign-in with OTP, so the platform uses the RTSP gateway directly: every connection carries the
+  # registered email + access password in the URL (email @ -> %40, done automatically), TCP transport.
+  - id: corp8
+    department: Corp8
+    name: Corp8 Sentinel cameras (challenge grid)
+    adapter: rtsp_template
+    host: 103.250.160.189
+    rtsp_port: 8554
+    main: "rtsp://{host}:{rtsp_port}/stream/cam{channel:02d}"
+    username_env: CORP8_USER                  # registered email (.env)
+    password_env: CORP8_PASS                  # access password (.env)
+    max_concurrent_pulls: 30                  # the relay pulls each camera once, however many operators watch
+    persistent_pull: true                     # one steady gateway session per camera; no login churn (gateway 401s)
+    channels:                                 # names from the Live Grid; cam21-cam30 names to fill in; anpr on plate-facing views
+      - {channel: 1, id: cam01, name: "Chiman bhai Bridge", anpr: true}
+      - {channel: 2, id: cam02, name: "Janpath"}
+      - {channel: 3, id: cam03, name: "O.N.G.C. Office"}
+      - {channel: 4, id: cam04, name: "Paldi Circle"}
+      - {channel: 5, id: cam05, name: "Visat teen Rasta"}
+      - {channel: 6, id: cam06, name: "Timbavadi gate, Junagadh", anpr: true}
+      - {channel: 7, id: cam07, name: "Hero showroom, Gir Somnath"}
+      - {channel: 8, id: cam08, name: "Majevadi gate, Junagadh", anpr: true}
+      - {channel: 9, id: cam09, name: "New bypass near BY circle, Junagadh"}
+      - {channel: 10, id: cam10, name: "Char chowk road 2, Junagadh"}
+      - {channel: 11, id: cam11, name: "Dolatpara, Junagadh"}
+      - {channel: 12, id: cam12, name: "Tri Mandir Adalaj Tollnaka", anpr: true}
+      - {channel: 13, id: cam13, name: "CN Vidhyalaya"}
+      - {channel: 14, id: cam14, name: "Delight RLVD", anpr: true}
+      - {channel: 15, id: cam15, name: "Suvidha park"}
+      - {channel: 16, id: cam16, name: "Visat P2"}
+      - {channel: 17, id: cam17, name: "Rajkot Bus Port CCTV", anpr: true}
+      - {channel: 18, id: cam18, name: "Rajkot CCTV"}
+      - {channel: 19, id: cam19, name: "Khaparia Gram Panchayat, Gandevi, Navsari"}
+      - {channel: 20, id: cam20, name: "Mohanpura"}
+      - {channel: 21, id: cam21, name: "CAM21"}
+      - {channel: 22, id: cam22, name: "CAM22"}
+      - {channel: 23, id: cam23, name: "CAM23"}
+      - {channel: 24, id: cam24, name: "CAM24"}
+      - {channel: 25, id: cam25, name: "CAM25"}
+      - {channel: 26, id: cam26, name: "CAM26"}
+      - {channel: 27, id: cam27, name: "CAM27"}
+      - {channel: 28, id: cam28, name: "CAM28"}
+      - {channel: 29, id: cam29, name: "CAM29"}
+      - {channel: 30, id: cam30, name: "CAM30"}

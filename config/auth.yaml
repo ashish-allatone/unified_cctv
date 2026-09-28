@@ -1,0 +1,61 @@
+# Identity, MFA and access policy. Secrets come from environment variables (${VAR}).
+#
+# Providers are tried in order for a username/password login: local users.yaml first, then LDAP.
+# OIDC (Azure AD / ADFS / Keycloak / any OpenID Connect IdP; SAML-only IdPs are fronted by Keycloak)
+# is a browser redirect flow started from the login page's "Sign in with <name>" button.
+
+providers:
+  local:
+    enabled: true                       # config/users.yaml
+
+  ldap:
+    enabled: false
+    server: ldaps://dc01.police.gov.in:636       # ldap:// or ldaps://
+    tls_verify: true
+    # How to bind as the user who is logging in. Active Directory accepts user@domain;
+    # OpenLDAP usually needs a DN template.
+    bind_template: "{username}@police.gov.in"    # or "uid={username},ou=people,dc=example,dc=in"
+    # Where to read the user's groups after a successful bind
+    base_dn: "DC=police,DC=gov,DC=in"
+    user_filter: "(sAMAccountName={username})"   # OpenLDAP: "(uid={username})"
+    group_attr: memberOf
+    # AD/LDAP group -> platform role + departments. First match wins; users in no listed group are refused.
+    group_map:
+      "CN=CCTV-Admins,OU=Groups,DC=police,DC=gov,DC=in":      {role: admin, departments: ["*"]}
+      "CN=CCTV-Supervisors,OU=Groups,DC=police,DC=gov,DC=in": {role: supervisor, departments: ["Police"]}
+      "CN=CCTV-Operators,OU=Groups,DC=police,DC=gov,DC=in":   {role: analyst, departments: ["Police"]}
+      "CN=CCTV-Viewers,OU=Groups,DC=police,DC=gov,DC=in":     {role: viewer, departments: ["Police"]}
+
+  oidc:
+    enabled: false
+    name: "State SSO"
+    issuer: https://login.microsoftonline.com/<tenant-id>/v2.0     # discovery at <issuer>/.well-known/openid-configuration
+    client_id: ${OIDC_CLIENT_ID:-}
+    client_secret: ${OIDC_CLIENT_SECRET:-}
+    redirect_uri: https://cctv.example.gov.in/api/auth/oidc/callback
+    scopes: [openid, profile, email]
+    username_claim: preferred_username
+    groups_claim: groups                 # or "roles" for Azure app roles
+    group_map:                           # same shape as ldap.group_map
+      "cctv-admins":     {role: admin, departments: ["*"]}
+      "cctv-operators":  {role: analyst, departments: ["Police"]}
+    # IdP-side MFA (Conditional Access etc.) is accepted as MFA when the token carries amr containing "mfa"
+    trust_idp_mfa: true
+
+mfa:
+  # Roles that must have TOTP enrolled (Google/Microsoft Authenticator). Others may enrol voluntarily.
+  # Pilot default is empty so demo logins stay one-step; production: [admin, supervisor]
+  required_roles: []
+  issuer_name: "Unified CCTV"
+  grace_logins: 3        # logins allowed before enrolment is enforced for a required role
+
+break_glass:
+  enabled: true
+  roles: [supervisor, admin]         # who may invoke it
+  ttl_minutes: 60
+  grants: {departments: ["*"], features: [live, playback, export, plate_search, movement]}
+  notify_roles: [admin]              # get a live alert when it is used
+
+session:
+  ttl_hours: 12
+  idle_minutes: 60

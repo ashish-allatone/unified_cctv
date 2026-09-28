@@ -1,0 +1,72 @@
+# Vendor presets for departmental systems. A source in sources.yaml can say `vendor: hikvision` and only
+# fill in host / credentials / channels; the preset supplies the adapter and its endpoints.
+#
+# These are built from the vendors' public documentation and the platform's own ONVIF / RTSP support.
+# They have NOT been verified against every firmware; treat each as a starting point and confirm with the
+# vendor's integration guide. Where a VMS speaks ONVIF Profile S/T, `onvif` is the safest choice.
+presets:
+  hikvision:              # NVR / DVR / cameras (ISAPI); streams via standard RTSP paths
+    adapter: rtsp_template
+    onvif_port: 80
+    main: "rtsp://{host}:{rtsp_port}/Streaming/Channels/{channel}01"
+    sub:  "rtsp://{host}:{rtsp_port}/Streaming/Channels/{channel}02"
+    notes: "Enable RTSP + ONVIF under Network > Advanced > Integration Protocol; create a viewer-level user."
+  dahua:
+    adapter: rtsp_template
+    onvif_port: 80
+    main: "rtsp://{host}:{rtsp_port}/cam/realmonitor?channel={channel}&subtype=0"
+    sub:  "rtsp://{host}:{rtsp_port}/cam/realmonitor?channel={channel}&subtype=1"
+    notes: "Same paths for CP Plus (Dahua OEM). ONVIF on port 80 by default."
+  cpplus:
+    extends: dahua
+  uniview:
+    adapter: rtsp_template
+    onvif_port: 80
+    main: "rtsp://{host}:{rtsp_port}/unicast/c{channel}/s0/live"
+    sub:  "rtsp://{host}:{rtsp_port}/unicast/c{channel}/s1/live"
+  axis:
+    adapter: rtsp_template
+    onvif_port: 80
+    main: "rtsp://{host}:{rtsp_port}/axis-media/media.amp?camera={channel}&streamprofile=Quality"
+    sub:  "rtsp://{host}:{rtsp_port}/axis-media/media.amp?camera={channel}&streamprofile=Balanced"
+  honeywell:
+    adapter: onvif
+    onvif_port: 80
+    notes: "Honeywell MAXPRO / Performance Series NVRs expose ONVIF Profile S; use the onvif adapter."
+  bosch:
+    adapter: onvif
+    onvif_port: 80
+    notes: "Bosch cameras / DIVAR expose ONVIF; BVMS itself is reached through its Video SDK (sdk_bridge)."
+  milestone:              # XProtect API Gateway (2022 R2+): OAuth password grant, REST cameras, RTSP via Mobile Server or direct
+    adapter: vendor_rest
+    api:
+      login_path: /IDP/connect/token
+      login_mode: form
+      login_body: {grant_type: password, username: "{user}", password: "{password}", client_id: GrantValidatorClient}
+      token_field: access_token
+      cameras_path: /api/rest/v1/cameras
+      cameras_list_field: array
+      id_field: id
+      name_field: name
+      online_field: enabled
+      online_value: "True"
+      stream_template: "rtsp://{host}:554/live/{id}"      # Milestone RTSP on the Recording Server (enable in Management Client)
+      profiles: {main: main}
+      stream_needs_credentials: true
+    notes: "Base URL = https://<api-gateway-host>/. RTSP via the XProtect RTSP service or ONVIF Bridge."
+  genetec:                # Security Center Web SDK (basic auth, JSON with format=json)
+    adapter: vendor_rest
+    api:
+      login_path: ""
+      api_key_header: Authorization
+      api_key_value: "Basic {basic}"                       # {basic} = base64(user;appid:password), see docs
+      cameras_path: /WebSdk/report/EntityConfiguration?q=EntityTypes@Camera,Name,RunningState&format=json
+      cameras_list_field: Rsp.Result
+      id_field: Guid
+      name_field: Name
+      online_field: RunningState
+      online_value: Running
+      stream_template: "rtsp://{host}:554/{id}"           # Genetec Media Gateway RTSP
+      profiles: {main: main}
+      stream_needs_credentials: true
+    notes: "Requires a Web SDK licence and a Media Gateway role; the app id is part of the basic credential."

@@ -1,0 +1,25 @@
+# GPU override for the ANPR and analytics workers (NVIDIA GPU + NVIDIA Container Toolkit on the host).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml build anpr
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Check first:  nvidia-smi   and   docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+services:
+  anpr:
+    image: uvp/platform-gpu:0.1
+    build: { context: ., dockerfile: platform/Dockerfile.gpu }
+    environment:
+      ANPR_GPU: "1"
+      ANPR_FPS: "8"
+      ANPR_THREADS: "2"
+      ANPR_WORKERS: ${ANPR_WORKERS:-8}
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }
+  analytics:
+    image: uvp/platform-gpu:0.1
+    build: { context: ., dockerfile: platform/Dockerfile.gpu }
+    environment:
+      ANPR_GPU: "1"
+      ANALYTICS_FPS: "4"
+      ANALYTICS_THREADS: "2"
+      ANALYTICS_WORKERS: ${ANALYTICS_WORKERS:-8}
+    deploy: { resources: { reservations: { devices: [{ driver: nvidia, count: all, capabilities: [gpu] }] } } }

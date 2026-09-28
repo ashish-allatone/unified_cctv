@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unified CCTV by Allatone</title>
+<link rel="icon" type="image/png" href="brand/favicon.png">
+<link rel="apple-touch-icon" href="brand/icon-192.png">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="styles.css">
+<script>/* apply the saved theme before first paint to avoid a flash */
+(function(){try{var t=localStorage.getItem("uvp-theme");if(!t)t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t);}catch(e){}})();</script>
+<script src="vendor/hls.min.js"></script>
+<script src="vendor/leaflet/leaflet.js"></script>
+</head>
+<body>
+<a href="#main-content" class="skip-link">Skip to content</a>
+
+<!-- Login -->
+<section id="login" class="login hidden">
+  <div class="theme-corner"><button class="btn ghost icon theme-toggle" type="button" title="Switch theme" aria-label="Switch theme"><span class="ico-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span><span class="ico-moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></span></button></div>
+  <form id="login-form" class="login-card">
+    <div class="brand-lg"><img class="login-logo" src="brand/logo.svg" alt="Allatone"></div>
+    <div class="brand-lg" style="margin-top:2px;justify-content:center;text-align:center"><span>Unified CCTV <span class="muted" style="font-weight:500;font-size:15px">by Allatone</span></span></div>
+    <p class="muted" data-i18n="login.tag" style="margin:-6px 0 0">Command centre access to departmental CCTV feeds</p>
+    <div id="login-setup" class="hidden">
+      <p class="muted"><b>First run.</b> Create the administrator account. This account becomes the <b>super admin</b>: it creates every other user, and sign-up closes after it.</p>
+      <label>Username <input name="su_username" autocomplete="username" placeholder="e.g. naresh" aria-label="Username"></label>
+      <label>Password <input name="su_password" type="password" autocomplete="new-password" aria-label="Password"></label>
+      <label>Confirm password <input name="su_password2" type="password" autocomplete="new-password" aria-label="Confirm password"></label>
+      <p class="small muted" id="setup-rules"></p>
+      <button class="btn primary" type="button" id="setup-btn">Create super admin</button>
+    </div>
+    <div id="login-step1">
+      <label><span data-i18n="login.user">Username</span> <input name="username" autocomplete="username" required aria-label="Username"></label>
+      <label><span data-i18n="login.pass">Password</span> <input name="password" type="password" autocomplete="current-password" required aria-label="Password"></label>
+      <button class="btn primary" type="submit" data-i18n="btn.signin">Sign in</button>
+      <a id="sso-btn" class="btn ghost hidden" href="/api/auth/oidc/start">Sign in with SSO</a>
+    </div>
+    <div id="login-step2" class="hidden">
+      <p class="muted">Enter the 6-digit code from your authenticator app (or a backup code).</p>
+      <label>Code <input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123 456"></label>
+      <button class="btn primary" type="button" id="mfa-verify">Verify</button>
+    </div>
+    <div id="login-enrol" class="hidden">
+      <p class="muted">Your role requires two-factor sign-in. Scan this with Google/Microsoft Authenticator, then enter the code.</p>
+      <img id="mfa-qr" alt="TOTP QR code" style="width:180px;height:180px;background:#fff;border-radius:8px;justify-self:center">
+      <p class="small muted">Manual key: <code id="mfa-secret"></code></p>
+      <label>Code <input name="enrol_code" inputmode="numeric" autocomplete="one-time-code"></label>
+      <button class="btn primary" type="button" id="mfa-confirm">Activate</button>
+    </div>
+    <p id="login-error" class="error"></p>
+    <p class="muted small hidden" id="demo-hint">Demo users (users.yaml, disabled once the first account is created): admin, supervisor, police_op, muni_op, viewer — password = name + 123, admin = admin123</p>
+  </form>
+</section>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <aside class="sidebar">
+    <div class="brand"><img class="logo-img" src="brand/mark.svg" alt="Allatone" width="30" height="30"><span class="name">Unified CCTV<span class="sub">by Allatone</span></span></div>
+    <nav id="tabs" aria-label="Sections">
+      <div class="group">Operations</div>
+      <button data-view="overview" title="Overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="5" rx="2"/><rect x="13" y="11" width="8" height="10" rx="2"/><rect x="3" y="14" width="8" height="7" rx="2"/></svg><span data-i18n="nav.overview">Overview</span></button>
+      <button data-view="wall" class="active" title="Video wall"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M12 4v13M3 10.5h18M8 21h8"/></svg><span data-i18n="nav.wall">Video wall</span></button>
+      <button data-view="map" title="Map"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s6-5.5 6-11a6 6 0 0 0-12 0c0 5.5 6 11 6 11z"/><circle cx="12" cy="10" r="2.2"/></svg><span data-i18n="nav.map">Map</span></button>
+      <button data-view="registry" data-feature="registry" title="Registry"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v4H4zM4 10h16v4H4zM4 15h16v4H4z"/><path d="M7 7h.01M7 12h.01M7 17h.01"/></svg><span data-i18n="nav.registry">Registry</span></button>
+      <button data-view="alerts" title="Alerts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><span data-i18n="nav.alerts">Alerts</span><span id="alert-badge" class="badge hidden">0</span></button>
+      <button data-view="counts" title="Counts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V10M10 19V5M16 19v-8M22 19H2"/></svg><span data-i18n="nav.counts">Counts</span></button>
+      <div class="group">Investigate</div>
+      <button data-view="search" data-feature="search" title="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><span data-i18n="nav.search">Search</span></button>
+      <button data-view="movement" data-feature="movement" title="Vehicle movement"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 18c4-1 5-6 9-7s5 4 7 3"/><circle cx="4" cy="18" r="1.6"/><circle cx="20" cy="14" r="1.6"/></svg><span data-i18n="nav.movement">Vehicle movement</span></button>
+      <button data-view="playback" data-feature="playback" title="Playback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l5.5-3.5z" fill="currentColor" stroke="none"/></svg><span data-i18n="nav.playback">Playback</span></button>
+      <button data-view="cases" data-feature="cases" title="Cases"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16v12H4zM9 7V5h6v2M4 12h16"/></svg><span data-i18n="nav.cases">Cases</span></button>
+      <button data-view="violations" data-feature="search" title="Violations"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 2.5 20h19z"/><path d="M12 9v5M12 17h.01"/></svg><span data-i18n="nav.violations">Violations</span></button>
+      <button data-view="watchlist" data-feature="search" title="Watchlist"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg><span data-i18n="nav.watchlist">Watchlist</span></button>
+      <button data-view="upload" data-feature="search" title="Upload &amp; recognise"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg><span data-i18n="nav.upload">Upload &amp; recognise</span></button>
+      <div class="group">System</div>
+      <button data-view="sources" data-feature="sources" title="Sources"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg><span data-i18n="nav.sources">Sources</span></button>
+      <button data-view="audit" data-feature="audit" title="Audit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7M9 8h3"/></svg><span data-i18n="nav.audit">Audit</span></button>
+      <button data-view="admin" data-feature="admin" title="Admin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span data-i18n="nav.admin">Admin</span></button>
+    </nav>
+    <div class="side-foot">
+      <a href="/m/" class="btn ghost small" target="_blank" title="Field-officer app (installable on phones)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s6-5.5 6-11a6 6 0 0 0-12 0c0 5.5 6 11 6 11z"/><circle cx="12" cy="10" r="2.2"/></svg><span class="lbl" data-i18n="btn.field">Field app</span></a>
+      <button id="sidebar-toggle" class="btn ghost small" type="button" title="Collapse sidebar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span class="lbl">Collapse</span></button>
+    </div>
+  </aside>
+
+  <header class="topbar">
+    <h1 id="page-title">Video wall</h1>
+    <span class="crumb" id="page-sub"></span>
+    <span class="spacer"></span>
+    <div class="user">
+      <span id="ws-dot" class="dot off" title="Live alert channel"></span>
+      <span id="user-name"></span>
+      <button id="break-glass" class="btn ghost small hidden" title="Emergency access with justification (audited)" data-i18n="btn.breakglass">Break glass</button>
+      <button id="mfa-setup" class="btn ghost small hidden" title="Enable two-factor sign-in">2FA</button>
+      <button id="lang-toggle" class="btn ghost small" data-i18n="lang" title="Language / भाषा / ભાષા">हिंदी</button>
+      <button id="speak-toggle" class="btn ghost icon" type="button" title="Speak alerts aloud" aria-label="Speak alerts aloud" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10v4h3l4 3.5v-11L7 10z"/><path class="spk-waves" d="M15 9.5a3.5 3.5 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10"/></svg></button>
+      <button class="btn ghost icon theme-toggle" type="button" title="Switch theme" aria-label="Switch theme"><span class="ico-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></span><span class="ico-moon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></span></button>
+      <button id="logout" class="btn ghost small" data-i18n="btn.signout">Sign out</button>
+    </div>
+  </header>
+  <div id="banners"><div id="bg-banner" class="bg-banner hidden"></div></div>
+
+  <div id="main-content" tabindex="-1"></div>
+
+  <!-- Overview -->
+  <main id="view-overview" class="view hidden">
+    <div class="view-head"><div><h2>Overview</h2><p id="ov-sub">Live state of the platform across all departments.</p></div>
+      <div class="quick"><button class="btn small" data-go="wall">Open video wall</button><button class="btn small" data-go="search" data-feature="search">Search plates</button><button class="btn small" data-go="alerts">Alerts</button></div></div>
+    <div class="kpis" id="ov-kpis"></div>
+    <div class="ov-grid">
+      <div class="panel"><div class="panel-head"><h3>ANPR reads per minute (last hour, IST)</h3><span class="muted small" id="ov-note"></span></div><div id="ov-chart" class="chart"></div>
+        <div class="panel-head" style="margin-top:14px"><h3>Latest reads</h3></div><div id="ov-recent" class="recent"></div></div>
+      <div style="display:grid;gap:14px;align-content:start">
+        <div class="panel"><div class="panel-head"><h3>Live counts</h3><span class="muted small" id="ov-counts-sub"></span></div><div id="ov-counts" class="status-list"></div></div>
+        <div class="panel"><div class="panel-head"><h3>Cameras</h3><span class="muted small" id="ov-cam-sub"></span></div><div id="ov-cams" class="status-list"></div></div>
+        <div class="panel"><div class="panel-head"><h3>Sources</h3></div><div id="ov-sources" class="status-list"></div></div>
+        <div class="panel"><div class="panel-head"><h3>Licence & health</h3></div><div id="ov-health" class="kv"></div></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Video wall -->
+  <div id="main-content" tabindex="-1"></div>
+  <main id="view-wall" class="view wall-view" aria-label="Video wall">
+    <aside class="cam-list">
+      <input id="cam-filter" placeholder="Filter cameras…" aria-label="Filter cameras" data-i18n-placeholder="wall.filter">
+      <div id="cam-tree"></div>
+      <p class="muted small hint" data-i18n="wall.hint">Click a camera to add it to the wall, or drag it onto a tile.</p>
+    </aside>
+    <section class="wall-main">
+      <div class="wall-toolbar">
+        <div class="seg" id="grid-select">
+          <button data-grid="1x1">1</button><button data-grid="2x2" class="active">2×2</button>
+          <button data-grid="3x3">3×3</button><button data-grid="4x4">4×4</button><button data-grid="1+5">1+5</button>
+        </div>
+        <select id="layout-select"><option value="">Saved layouts…</option></select>
+        <button id="layout-save" class="btn ghost small" data-feature="live">Save layout</button>
+        <button id="wall-clear" class="btn ghost small">Clear</button>
+        <label class="small muted" title="Draw the analytics / ANPR detections over the live tiles"><input type="checkbox" id="dets-toggle" checked> Detections</label>
+        <span class="spacer"></span>
+        <span class="muted small" id="wall-info"></span>
+      </div>
+      <div id="wall" class="wall g-2x2"></div>
+      <div class="ticker"><span class="ticker-label">Live ANPR</span><div id="ticker-items"></div></div>
+    </section>
+  </main>
+
+  <!-- Search dashboard -->
+  <main id="view-search" class="view hidden">
+    <div class="view-head"><div><h2>ANPR search</h2><p>Every plate read across all departments: search, filter, export a signed CSV.</p></div></div>
+    <div class="kpis" id="kpis"></div>
+    <div class="panel">
+      <div class="panel-head"><h3>ANPR reads per minute (last hour, IST)</h3><span class="muted small" id="backend-note"></span></div>
+      <div id="rate-chart" class="chart"></div>
+    </div>
+    <form id="search-form" class="panel search-form">
+      <label><span data-i18n="search.plate">Plate</span> <input name="plate" placeholder="MH12AB1234, MH12*, *1234" aria-label="Plate"></label>
+      <label class="check"><input type="checkbox" name="fuzzy"> Fuzzy (1 character off)</label>
+      <label>Camera <select name="camera"><option value="">All cameras</option></select></label>
+      <label>Tag <select name="tag"><option value="">Any tag</option><option>watchlist</option><option>low_confidence</option><option>invalid_format</option><option>night_movement</option><option>after_hours_depot</option><option>night</option><option>non_standard_plate</option><option>challan_suggested</option><option>wrong_way</option><option>over_speed</option><option>triple_riding</option><option>no_helmet</option></select></label>
+      <label>Vehicle <select name="vehicle_type"><option value="">Any type</option><option value="car">car</option><option value="two_wheeler">two-wheeler</option><option value="bus">bus</option><option value="truck">truck</option><option value="light_vehicle">light vehicle</option></select></label>
+      <label>Colour <select name="colour"><option value="">Any colour</option><option>white</option><option>silver</option><option>grey</option><option>black</option><option>red</option><option>blue</option><option>yellow</option><option>green</option><option>orange</option><option>brown</option></select></label>
+      <label>From <input type="datetime-local" name="since"></label>
+      <label>To <input type="datetime-local" name="until"></label>
+      <button class="btn primary" data-i18n="btn.search">Search</button>
+      <button type="button" id="export-csv" class="btn ghost" data-feature="export" title="Signed CSV (zip with manifest + signature)" data-i18n="btn.export">Export signed CSV</button>
+    </form>
+    <div class="panel">
+      <div class="panel-head"><h3 id="result-title">Latest vehicle records</h3></div>
+      <table class="table" id="results"><thead><tr><th data-i18n="th.time">Time (IST)</th><th data-i18n="th.plate">Plate</th><th data-i18n="th.crop">Crop</th><th data-i18n="th.camera">Camera</th><th data-i18n="th.department">Department</th><th data-i18n="th.confidence">Confidence</th><th data-i18n="th.reads">Reads</th><th data-i18n="th.direction">Direction</th><th data-i18n="th.vehicle">Vehicle</th><th data-i18n="th.tags">Tags</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+  </main>
+
+  <!-- Playback (archived recordings) -->
+  <main id="view-playback" class="view hidden">
+    <div class="view-head"><div><h2>Playback</h2><p>Archived recordings and bookmarks, streamed from object storage.</p></div></div>
+    <form id="pb-form" class="panel search-form">
+      <label>Camera <select name="camera" id="pb-camera"></select></label>
+      <label>Day (UTC) <input name="day" type="date"></label>
+      <button class="btn primary">List recordings</button>
+      <span class="muted small" id="pb-note">Recorded cameras only (RECORD_MODE). Segments are stored in object storage and streamed from there.</span>
+    </form>
+    <div class="panel">
+      <div class="panel-head"><h3 id="pb-title">Recordings</h3><span class="muted small" id="pb-sub"></span></div>
+      <table class="table" id="pb-table"><thead><tr><th>Start (IST)</th><th>Length</th><th>Size</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+    <form id="bm-form" class="panel search-form">
+      <label>Bookmark camera <select name="camera" id="bm-camera"></select></label>
+      <label>At (IST) <input name="ts" type="datetime-local"></label>
+      <label>Before (s) <input name="before_s" type="number" value="10" min="1" max="120"></label>
+      <label>After (s) <input name="after_s" type="number" value="10" min="1" max="120"></label>
+      <label>Label <input name="label" placeholder="what happened"></label>
+      <button class="btn primary">Add bookmark</button>
+    </form>
+    <div class="panel"><div class="panel-head"><h3>Bookmarks</h3><span class="muted small">Clips are cut from the recording buffer or the archive and can be filed into a case</span></div>
+      <table class="table" id="bm-table"><thead><tr><th>When (IST)</th><th>Camera</th><th>Label</th><th>Window</th><th>By</th><th>Clip</th><th></th></tr></thead><tbody></tbody></table></div>
+  </main>
+
+  <!-- Cases -->
+  <main id="view-cases" class="view hidden">
+    <div class="view-head"><div><h2>Cases</h2><p>Investigations: sightings, clips, bookmarks and notes with a chain of custody.</p></div></div>
+    <form id="case-form" class="panel search-form">
+      <label>New case title <input name="title" required placeholder="Hit and run, Ring Road"></label>
+      <label>Reference <input name="reference" placeholder="FIR / complaint no."></label>
+      <label>Priority <select name="priority"><option>high</option><option selected>medium</option><option>low</option></select></label>
+      <label>Assign to <input name="owner" placeholder="username (default: you)"></label>
+      <button class="btn primary">Open case</button>
+      <label class="check small"><input type="checkbox" id="cases-mine"> Only my cases</label>
+    </form>
+    <div class="case-grid">
+      <div class="panel"><div class="panel-head"><h3>Cases</h3></div>
+        <table class="table" id="cases-table"><thead><tr><th>Number</th><th>Title</th><th>Ref</th><th>Priority</th><th>Owner</th><th>Items</th><th>Status</th><th>Updated (IST)</th></tr></thead><tbody></tbody></table></div>
+      <div class="panel" id="case-detail"><p class="muted">Select a case.</p></div>
+    </div>
+  </main>
+
+  <!-- Map -->
+  <main id="view-map" class="view hidden">
+    <div class="view-head"><div><h2>Map</h2><p>Camera positions and coverage cones; click the map to find the nearest cameras.</p></div></div>
+    <div class="panel search-form" style="margin-bottom:12px">
+      <span class="muted small">Every registered camera. Click anywhere on the map to find the nearest cameras to an incident.</span>
+      <label class="small">Colour by <select id="map-colour"><option value="department">department</option><option value="camera_type">camera type</option><option value="status">health / status</option><option value="ownership">ownership</option><option value="connectivity">connectivity</option></select></label>
+      <label class="check small"><input type="checkbox" id="map-cones" checked> Coverage cones</label>
+      <label class="check small"><input type="checkbox" id="map-registry-only" checked> Registry-only cameras (no feed)</label>
+      <label class="check small"><input type="checkbox" id="map-gaps"> Uncovered zones (gap analysis)</label>
+      <label class="check small"><input type="checkbox" id="map-tiles" checked> Street map tiles (needs internet)</label>
+      <span id="map-legend" class="small"></span>
+      <span id="map-nearest" class="small"></span>
+    </div>
+    <div id="gis-map" style="height:calc(100vh - 170px);border-radius:12px;border:1px solid var(--line)"></div>
+  </main>
+
+  <!-- Vehicle movement -->
+  <!-- Counts -->
+  <main id="view-counts" class="view hidden">
+    <div class="view-head"><div><h2>Vehicle &amp; crowd counts</h2><p>Vehicles and people in view on every camera — live (refreshed every 5 s) and per minute for the selected period. A camera goes <b>crowded</b> when persons exceed its threshold; that also raises an alert.</p></div>
+      <div class="quick"><label class="small">Period <select id="counts-hours"><option value="1">last hour</option><option value="3">3 hours</option><option value="12">12 hours</option><option value="24">24 hours</option><option value="168">7 days</option></select></label><button class="btn small ghost" id="counts-refresh">Refresh</button></div></div>
+    <div id="counts-status" class="small" style="margin:-4px 0 12px"></div>
+    <div class="kpis" id="counts-kpis"></div>
+    <div class="panel">
+      <table class="table" id="counts-table"><thead><tr><th>Camera</th><th>Department</th><th>Vehicles now</th><th>People now</th><th>Crowd</th><th>Avg vehicles</th><th>Peak vehicles</th><th>Avg people</th><th>Peak people</th><th>Flow (line)</th><th>Trend (vehicles · people)</th></tr></thead><tbody></tbody></table>
+      <p class="muted small" id="counts-note" style="margin-top:8px"></p>
+    </div>
+  </main>
+
+  <!-- Registry -->
+  <main id="view-registry" class="view hidden">
+    <div class="view-head"><div><h2>CCTV registry</h2><p>Central inventory of every camera in the State — integrated or not: location, department, type, ownership, connectivity, storage, installation and maintenance. Feeds the GIS map and the gap analysis.</p></div>
+      <div class="quick"><button class="btn small" id="reg-add" data-feature="registry_edit">Add camera</button><button class="btn small" id="reg-import" data-feature="registry_edit">Import CSV</button><button class="btn small ghost" id="reg-template">CSV template</button><button class="btn small ghost" id="reg-export">Export CSV</button><button class="btn small" id="reg-geocode" data-feature="registry_edit" title="Find coordinates for cameras from their names (OpenStreetMap)">Locate by name</button><button class="btn small primary" id="reg-gaps">Gap-analysis report</button><button class="btn small ghost" id="reg-api">API</button></div></div>
+    <div class="kpis" id="reg-kpis"></div>
+    <div class="panel">
+      <form id="reg-filter" class="search-form" onsubmit="return false">
+        <label>Search <input name="q" placeholder="name, id, address, pole, make…"></label>
+        <label>Department <select name="department"><option value="">all</option></select></label>
+        <label>Type <select name="camera_type"><option value="">all</option><option>fixed</option><option>dome</option><option>bullet</option><option>ptz</option><option>anpr</option><option>thermal</option><option>other</option></select></label>
+        <label>Health <select name="status"><option value="">all</option><option value="online">online</option><option value="offline">offline</option><option value="not-integrated">not integrated</option><option value="unknown">unknown</option></select></label>
+        <label>Connectivity <select name="connectivity"><option value="">all</option><option>fibre</option><option>lan</option><option>4g</option><option>wifi</option><option>offline-dvr</option><option>none</option></select></label>
+        <label>Ownership <select name="ownership"><option value="">all</option><option>department</option><option>vendor-managed</option><option>leased</option><option>private-shared</option><option>other</option></select></label>
+        <label>Maintenance <select name="maintenance"><option value="">all</option><option>ok</option><option>due</option><option>under_repair</option><option>faulty</option><option>decommissioned</option><option>planned</option></select></label>
+        <label>Feed <select name="integrated"><option value="">all</option><option value="yes">integrated</option><option value="no">registry only</option></select></label>
+        <span class="muted small" id="reg-count"></span>
+      </form>
+      <div style="overflow:auto"><table class="table" id="reg-table"><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Type</th><th>Health</th><th>Connectivity</th><th>Storage</th><th>Installed</th><th>Maintenance</th><th>Location</th><th></th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </main>
+
+  <main id="view-movement" class="view hidden">
+    <div class="view-head"><div><h2>Vehicle movement</h2><p>Trace one vehicle across cameras and stitch the clips into one file.</p></div></div>
+    <form id="move-form" class="panel search-form">
+      <label>Plate <input name="plate" placeholder="e.g. MH12AB1234" required></label>
+      <label class="check"><input type="checkbox" name="fuzzy"> Include 1-character OCR variants</label>
+      <label>From <input name="since" type="datetime-local"></label>
+      <label>To <input name="until" type="datetime-local"></label>
+      <button class="btn primary">Trace vehicle</button>
+      <button class="btn ghost" type="button" id="stitch-btn" data-feature="export" title="One MP4 of every archived clip, captioned per camera">Stitch clips</button>
+      <label data-feature="cases">File into case <select name="case_id" id="move-case"><option value="">— none —</option></select></label>
+    </form>
+    <div class="move-grid">
+      <div class="panel"><div class="panel-head"><h3 id="move-title">Route</h3><span class="muted small" id="move-sub"></span></div><div id="move-map" class="move-map"></div></div>
+      <div class="panel"><div class="panel-head"><h3>Sightings</h3></div><ol id="move-list" class="timeline"></ol></div>
+    </div>
+  </main>
+
+  <!-- Alerts -->
+  <main id="view-alerts" class="view hidden">
+    <div class="view-head"><div><h2>Alerts</h2><p>Watchlist hits as they happen; acknowledge and hand off.</p></div></div>
+    <div class="panel">
+      <div class="panel-head"><h3>Watchlist alerts</h3><label class="check small"><input type="checkbox" id="alerts-open"> Open only</label></div>
+      <table class="table" id="alerts-table"><thead><tr><th>Time (IST)</th><th>Plate read</th><th>Crop</th><th>Watchlist entry</th><th>Match</th><th>Camera</th><th>Reason</th><th>Status</th></tr></thead><tbody></tbody></table>
+    </div>
+  </main>
+
+  <!-- Violations: incidents + challan queue -->
+  <main id="view-violations" class="view hidden">
+    <div class="view-head"><div><h2>Violations & analytics</h2><p>Challans, plate review, ANPR accuracy, traffic counts and zone incidents.</p></div></div>
+    <div class="cards" id="viol-cards"></div>
+    <div class="panel">
+      <div class="panel-head"><h3>Challans</h3><span><select id="ch-status" class="small"><option value="draft">draft (to review)</option><option value="approved">approved</option><option value="sent">sent</option><option value="failed">failed</option><option value="rejected">rejected</option><option value="all">all</option></select></span></div>
+      <table class="table" id="ch-table"><thead><tr><th>Number</th><th>When (IST)</th><th>Plate</th><th>Offence</th><th>Section</th><th>Fine</th><th>Camera</th><th>Evidence</th><th>Status</th><th></th></tr></thead><tbody></tbody></table>
+      <p class="small muted">Fine amounts are the central MV Act defaults from config/rules.yaml; confirm the state notification before approving. Approval hands the challan to the e-challan endpoint (ECHALLAN_WEBHOOK_URL) with a signed payload.</p>
+    </div>
+    <div class="panel" data-feature="plate_search">
+      <div class="panel-head"><h3 data-i18n="review.title">Plate review queue</h3><span class="muted small">Confirm or correct a sample every week: corrections fix the record and feed the accuracy report and the OCR retraining set</span></div>
+      <table class="table" id="review-table"><thead><tr><th data-i18n="th.time">Time (IST)</th><th>Read as</th><th data-i18n="th.crop">Crop</th><th data-i18n="th.camera">Camera</th><th data-i18n="th.tags">Tags</th><th>Verdict</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3 data-i18n="report.title">ANPR accuracy (weekly)</h3><span><select id="rep-week" class="small"><option value="0">this week</option><option value="1">last week</option><option value="2">2 weeks ago</option><option value="3">3 weeks ago</option></select> <a class="btn ghost small" id="rep-train" data-feature="export" href="#">Retraining set</a></span></div>
+      <p class="small muted" id="rep-sub"></p>
+      <table class="table" id="rep-table"><thead><tr><th data-i18n="th.camera">Camera</th><th>Reads</th><th>Reviewed</th><th>Accuracy</th><th>Mean conf.</th><th>Low conf.</th><th>Invalid</th><th>Night</th><th>Top correction reasons</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Traffic (vehicles in view, per camera)</h3><span><select id="tr-hours" class="small"><option value="1">last hour</option><option value="6">6 h</option><option value="24" selected>24 h</option><option value="168">7 days</option></select> <span class="muted small" id="tr-sub"></span></span></div>
+      <table class="table" id="tr-table"><thead><tr><th>Camera</th><th>Windows</th><th>Avg vehicles</th><th>Peak vehicles</th><th>Avg persons</th><th>By type (avg)</th><th>Crossed line →</th><th>Crossed line ←</th><th>Last</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Incidents (zone analytics)</h3><label class="check small"><input type="checkbox" id="inc-open"> Open only</label></div>
+      <table class="table" id="inc-table"><thead><tr><th>When (IST)</th><th>Kind</th><th>Zone</th><th>Camera</th><th>Plate</th><th>Detail</th><th>Snapshot</th><th>Status</th></tr></thead><tbody></tbody></table>
+    </div>
+  </main>
+
+  <!-- Watchlist -->
+  <main id="view-watchlist" class="view hidden">
+    <div class="view-head"><div><h2>Watchlist</h2><p>Plates and persons of interest, external hotlists.</p></div></div>
+    <form id="watch-form" class="panel search-form" data-feature="watchlist">
+      <label>Plate <input name="plate" required placeholder="MH12AB1234"></label>
+      <label>Reason <input name="reason" placeholder="e.g. stolen vehicle FIR 123/2026"></label>
+      <label>Priority <select name="priority"><option>high</option><option>medium</option><option>low</option></select></label>
+      <label>Expires in (days) <input name="days" type="number" value="30" min="1" max="365"></label>
+      <button class="btn primary">Add to watchlist</button>
+    </form>
+    <div class="panel" id="persons-panel">
+      <div class="panel-head"><h3>Persons of interest (face recognition)</h3><span class="muted small">Enrol with one or more clear photos; matches on cameras with <code>face: true</code> raise an alert. Every enrolment and match is audited.</span></div>
+      <form id="person-form" class="search-form" data-feature="watchlist" enctype="multipart/form-data">
+        <label>Name <input name="name" required placeholder="Full name"></label>
+        <label>Category <select name="category"><option value="wanted">wanted</option><option value="missing">missing</option><option value="suspect">suspect</option><option value="other">other</option></select></label>
+        <label>Priority <select name="priority"><option>high</option><option>medium</option><option>low</option></select></label>
+        <label>Reference <input name="reference" placeholder="FIR / order no."></label>
+        <label>Reason <input name="reason" placeholder="why this person is of interest"></label>
+        <label>Expires (days) <input name="days" type="number" value="90" min="0" max="3650"></label>
+        <label>Photos <input name="photos" type="file" accept="image/*" multiple required></label>
+        <button class="btn primary">Enrol person</button>
+        <span class="muted small" id="person-form-note"></span>
+      </form>
+      <p class="muted small" style="margin:6px 0 12px">Have a phone video, WhatsApp clip or DVR export? Use <a href="#" data-goto="upload"><b>Upload &amp; recognise</b></a> to find every person and plate in it and enrol a face straight from the footage.</p>
+      <table class="table" id="persons-table"><thead><tr><th>Photo</th><th>Name</th><th>Category</th><th>Priority</th><th>Reference</th><th>Photos</th><th>Last seen</th><th>Sightings</th><th>Expires</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel"><div class="panel-head"><h3>External hotlists</h3><button class="btn ghost small" id="hl-sync" data-feature="watchlist">Sync now</button></div><div id="hl-list" class="small muted"></div></div>
+    <div class="panel"><table class="table" id="watch-table"><thead><tr><th>Plate</th><th>Reason</th><th>Priority</th><th>Added by</th><th>Expires</th><th></th></tr></thead><tbody></tbody></table></div>
+  </main>
+
+  <!-- Sources -->
+  <main id="view-upload" class="view hidden">
+    <div class="view-head"><div><h2>Upload &amp; recognise</h2><p>Footage that is not on any camera — a phone recording, WhatsApp clip, DVR export or photos: find every person and number plate in it, check them against the watchlist, and enrol a face straight from the video.</p></div></div>
+    <div class="card">
+      <form id="analysis-form" class="search-form" enctype="multipart/form-data">
+        <label>Video / photos <input name="files" type="file" accept="video/*,image/*" multiple required></label>
+        <label>Note <input name="note" placeholder="e.g. WhatsApp video from complainant, 26 Sep"></label>
+        <label class="check"><input type="checkbox" name="plates" checked> Read number plates too</label>
+        <button class="btn primary">Upload &amp; analyse</button>
+        <span class="muted small" id="analysis-note"></span>
+      </form>
+      <p class="muted small" style="margin:8px 0 0">mp4 / mov / mkv / avi / webm or jpg / png, several files at once, up to 300 MB. Faces need to be roughly 40 px wide or more in the footage; the job samples 2 frames per second (max 7.5 min of video). Every upload and enrolment is audited.</p>
+      <div id="analysis-result"></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="panel-head"><h3>Previous uploads</h3><button class="btn small ghost" id="upload-refresh">Refresh</button></div>
+      <table class="table" id="upload-table"><thead><tr><th>When</th><th>Files</th><th>Note</th><th>Status</th><th>Persons</th><th>Plates</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+  </main>
+  <main id="view-sources" class="view hidden">
+    <div class="view-head"><div><h2>Sources</h2><p>Departmental systems, capacity, camera health and the video archive.</p></div>
+      <div class="quick"><button class="btn small primary" id="dev-connect" data-feature="admin">Connect a device</button></div></div>
+    <div id="source-cards" class="cards"></div>
+    <div class="panel" id="dev-panel"><div class="panel-head"><h3>Devices connected from the console</h3><span class="muted small">Stored encrypted in the platform database; the adapters connect within seconds. Systems defined in sources.yaml are listed above.</span></div>
+      <table class="table" id="dev-table"><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Type</th><th>Host</th><th>Cameras</th><th>Status</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="panel note">
+      <h3>How departmental systems stay unaffected</h3>
+      <ul>
+        <li>Each source is read with one read-only account. Adapters block every non-read call in code.</li>
+        <li>The relay pulls each stream once, however many operators watch it. Pulls start on demand and stop 10 s after the last viewer leaves.</li>
+        <li>Each source has an agreed cap on concurrent pulls. New streams are refused once the cap is reached.</li>
+        <li>ANPR reads from the relay, not from the departmental system.</li>
+        <li>Departmental recordings stay in each department's VMS. The platform's own archive (event clips, plate crops and the streams it already pulls for ANPR) is written to object storage from the relay, never re-read from the departmental system.</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Capacity per department</h3><span class="muted small" id="cap-sub"></span></div>
+      <table class="table" id="cap-table"><thead><tr><th>Department</th><th>Cameras online</th><th>ANPR channels</th><th>Recorded</th><th>Pulls / cap</th><th>Viewers</th><th>Events 24 h</th><th>Archive</th><th>Relays</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Camera health (SLA)</h3><span><select id="sla-days" class="small"><option value="1">24 h</option><option value="7" selected>7 days</option><option value="30">30 days</option></select> <span class="muted small" id="sla-sub"></span></span></div>
+      <table class="table" id="sla-table"><thead><tr><th>Camera</th><th>Department</th><th>Status</th><th>Uptime</th><th>Outages</th><th>Downtime</th><th>Longest</th><th>Image quality</th><th>SLA ≥ 99%</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Video archive</h3><span class="muted small" id="archive-sub"></span></div>
+      <table class="table" id="archive-table"><thead><tr><th>Department</th><th>Recorded segments</th><th>Storage</th><th>Event clips</th><th>Oldest</th><th>Newest</th></tr></thead><tbody></tbody></table>
+    </div>
+  </main>
+
+  <!-- Admin: users, grants, legal holds, compliance -->
+  <main id="view-admin" class="view hidden">
+    <div class="view-head"><div><h2>Administration</h2><p>Users, access grants, legal holds, API keys, webhooks, compliance.</p></div></div>
+    <div class="cards" id="compliance-cards"></div>
+    <div class="panel">
+      <div class="panel-head"><h3>Users</h3><span class="muted small" id="users-sub">Accounts are created by a super admin; directory (LDAP/SSO) users appear after first login</span></div>
+      <form id="user-form" class="search-form hidden">
+        <label>Username <input name="username" required placeholder="firstname.lastname"></label>
+        <label>Password <input name="password" type="password" required autocomplete="new-password" placeholder="min 10, 1 uppercase, 1 digit"></label>
+        <label>Role <select name="role"><option value="viewer">viewer</option><option value="analyst">analyst</option><option value="supervisor">supervisor</option><option value="admin">admin</option></select></label>
+        <label>Departments <input name="departments" value="*" placeholder="* or Police, Municipal"></label>
+        <label class="check"><input type="checkbox" name="is_super"> super admin</label>
+        <button class="btn primary">Create user</button>
+      </form>
+      <table class="table" id="users-table"><thead><tr><th>User</th><th>Provider</th><th>Role</th><th>Departments</th><th>2FA</th><th>Last login</th><th>Grants</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+    <form id="grant-form" class="panel search-form">
+      <label>User <input name="username" required placeholder="police_op"></label>
+      <label>Kind <select name="kind"><option value="feature">feature</option><option value="camera">camera</option><option value="department">department</option></select></label>
+      <label>Value <input name="value" required placeholder="export / muni-cam1 / Municipal"></label>
+      <label>Hours <input name="hours" type="number" value="24" min="0" step="0.5"></label>
+      <label>Reason <input name="reason" required placeholder="shift cover, court order…"></label>
+      <button class="btn primary">Grant access</button>
+    </form>
+    <div class="panel"><div class="panel-head"><h3>Active grants and break-glass sessions</h3></div>
+      <table class="table" id="grants-table"><thead><tr><th>User</th><th>Kind</th><th>Value</th><th>Reason</th><th>By</th><th>Expires (IST)</th><th></th></tr></thead><tbody></tbody></table></div>
+    <form id="hold-form" class="panel search-form">
+      <label>Legal hold on <select name="kind"><option value="plate">plate</option><option value="camera">camera</option><option value="event">event</option></select></label>
+      <label>Value <input name="value" required placeholder="MP04ZR7493 / police-cam1 / event id"></label>
+      <label>Reference <input name="reference" placeholder="FIR / court order no."></label>
+      <label>Reason <input name="reason"></label>
+      <button class="btn primary">Place hold</button>
+    </form>
+    <div class="panel"><div class="panel-head"><h3>Legal holds</h3><span class="muted small">Held records are never purged by retention and cannot be erased under DPDP requests</span></div>
+      <table class="table" id="holds-table"><thead><tr><th>Kind</th><th>Value</th><th>Reference</th><th>Reason</th><th>By</th><th>Since (IST)</th><th></th></tr></thead><tbody></tbody></table></div>
+    <form id="key-form" class="panel search-form">
+      <label>API key name <input name="name" required placeholder="traffic-erp"></label>
+      <label>Features <input name="features" value="search,playback" placeholder="search,playback,plate_search"></label>
+      <label>Departments <input name="departments" value="*"></label>
+      <label>Valid days <input name="days" type="number" value="365" min="0"></label>
+      <button class="btn primary">Create key</button>
+    </form>
+    <div class="panel"><div class="panel-head"><h3>API keys</h3><span class="muted small">Send as <code>X-API-Key</code>; OpenAPI at <a href="/docs" target="_blank">/docs</a></span></div>
+      <table class="table" id="keys-table"><thead><tr><th>Name</th><th>Prefix</th><th>Features</th><th>Departments</th><th>Expires</th><th>Last used</th><th></th></tr></thead><tbody></tbody></table></div>
+    <form id="hook-form" class="panel search-form">
+      <label>Webhook name <input name="name" required placeholder="CAD intake"></label>
+      <label>URL <input name="url" required placeholder="https://cad.example.gov.in/api/cctv"></label>
+      <label>Kinds <input name="kinds" value="alert,incident" placeholder="anpr.event,alert,incident,challan,camera.health"></label>
+      <label>Departments <input name="departments" value="*"></label>
+      <button class="btn primary">Add webhook</button>
+    </form>
+    <div class="panel"><div class="panel-head"><h3>Webhooks</h3><span class="muted small">Signed with X-UVP-Signature (HMAC-SHA256); auto-disabled after 50 failures</span></div>
+      <table class="table" id="hooks-table"><thead><tr><th>Name</th><th>URL</th><th>Kinds</th><th>Departments</th><th>Last</th><th>Failures</th><th></th></tr></thead><tbody></tbody></table></div>
+    <div class="panel"><div class="panel-head"><h3>Notifications</h3><span class="muted small" id="notif-sub"></span></div>
+      <table class="table" id="notif-table"><thead><tr><th>When (IST)</th><th>Channel</th><th>To</th><th>Kind</th><th>Subject</th><th>Status</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
+    <div class="panel"><div class="panel-head"><h3>Tenants & vendor presets</h3></div><div id="tenants-list" class="small"></div><div id="vendors-list" class="small muted"></div></div>
+    <form id="dpdp-form" class="panel search-form">
+      <label>DPDP request for plate <input name="plate" required placeholder="MP04ZR7493"></label>
+      <button class="btn ghost" type="button" id="dpdp-access">Subject access report</button>
+      <button class="btn ghost" type="button" id="dpdp-erase">Erase records</button>
+      <span class="muted small">Both are audited; erasure is refused while a legal hold or watchlist entry exists.</span>
+    </form>
+  </main>
+
+  <!-- Audit -->
+  <main id="view-audit" class="view hidden">
+    <div class="view-head"><div><h2>Audit log</h2><p>Hash-chained record of every sensitive action.</p></div></div>
+    <div class="panel"><div class="panel-head"><h3>Audit log (hash-chained)</h3><span><span id="audit-chain" class="muted small"></span> <button class="btn ghost small" id="audit-verify">Verify chain</button></span></div>
+    <table class="table" id="audit-table"><thead><tr><th>Time (IST)</th><th>User</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead><tbody></tbody></table></div>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-card"><button class="modal-x" id="modal-x" aria-label="Close">×</button><div id="modal-body"></div></div></div>
+<div id="toasts" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

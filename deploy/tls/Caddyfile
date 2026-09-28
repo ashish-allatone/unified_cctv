@@ -1,0 +1,32 @@
+# TLS termination for the platform: one HTTPS origin for the console, the API, WebSocket alerts,
+# and the relay's WebRTC signalling and HLS. WebRTC media itself is DTLS-SRTP (always encrypted)
+# on UDP 8189 straight to the relay; open that port on the firewall.
+#
+# Usage (docker compose --profile tls up -d):
+#   .env: PUBLIC_HOST=cctv.example.gov.in  RELAY_PUBLIC_BASE=https://cctv.example.gov.in/relay
+#   Caddy obtains a Let's Encrypt certificate automatically when the host is public; for an
+#   internal CA put the cert+key under deploy/tls/certs and swap the `tls` line below.
+
+{$PUBLIC_HOST:localhost} {
+	encode gzip
+	# tls /certs/fullchain.pem /certs/privkey.pem      # internal CA / government PKI certificate
+	tls internal                                        # self-signed for the pilot; browsers will warn once
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: https:; connect-src 'self' wss: https:; style-src 'self' 'unsafe-inline'"
+	}
+
+	handle_path /relay/webrtc/* {
+		reverse_proxy relay:8889
+	}
+	handle_path /relay/hls/* {
+		reverse_proxy relay:8888
+	}
+	handle {
+		reverse_proxy api:8000
+	}
+}

@@ -1,0 +1,27 @@
+# Simulated Police NVR video server. Serves each camera's two profiles over RTSP
+# only; streams start when first requested, like a real NVR.
+logLevel: warn
+writeQueueSize: 4096
+rtspAddress: :18554
+rtpAddress: :18000
+rtcpAddress: :18001
+rtmp: no
+hls: no
+webrtc: no
+srt: no
+api: yes
+apiAddress: 127.0.0.1:19997   # simulator-side stats, used by tests/test_non_interference.py
+authMethod: internal
+authInternalUsers:
+  - user: any
+    ips: ['127.0.0.1', '::1']
+    permissions: [{action: publish}, {action: api}]
+  - user: uvp-viewer
+    pass: police-view-only
+    permissions: [{action: read}]
+pathDefaults:
+  runOnDemandCloseAfter: 10s
+paths:
+  "~^(police-cam[0-9])/(main|sub)$":
+    runOnDemand: ffmpeg -loglevel error -re -stream_loop -1 -i ${MEDIA_DIR}/${G1}_${G2}.mp4 -c copy -f rtsp rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH
+    runOnDemandRestart: yes

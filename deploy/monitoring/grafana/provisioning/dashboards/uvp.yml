@@ -1,0 +1,6 @@
+apiVersion: 1
+providers:
+  - name: unified-cctv
+    folder: Unified CCTV
+    type: file
+    options: {path: /var/lib/grafana/dashboards}

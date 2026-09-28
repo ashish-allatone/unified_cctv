@@ -1,0 +1,17 @@
+# Multi-tenancy: one deployment serving several cities / authorities. A tenant is a named set of
+# departments with its own branding; users, API keys and cases are scoped to their tenant's departments.
+# The special tenant "central" sees everything (state-level control room). Users pick up their tenant from
+# users.yaml (`tenant:`), the LDAP/OIDC group map (`tenant:`), or default to the tenant that owns their
+# departments.
+tenants:
+  - id: central
+    name: State Command Centre
+    departments: ["*"]
+  - id: city-a
+    name: City A Smart City SPV
+    departments: [Police, Municipal]
+    branding: {title: "City A CCTV", accent: "#3b82f6"}
+  - id: city-b
+    name: City B Police Commissionerate
+    departments: [Traffic]
+    branding: {title: "City B Traffic Command", accent: "#f59e0b"}

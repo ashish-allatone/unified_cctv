@@ -1,0 +1,91 @@
+# Platform stream relay (MediaMTX).
+# - Pulls each departmental stream ONCE (on demand) and re-serves it to any number
+#   of operators over WebRTC (<1 s) or HLS (fallback), and to ANPR workers over RTSP.
+# - Paths are created at runtime by the adapter service through the control API.
+# - Every read/publish/API request is authorised by the platform API
+#   (/internal/relay-auth), which checks the viewer's token, department rights and
+#   the per-source concurrent-pull cap.
+logLevel: info
+writeQueueSize: 4096
+api: yes
+apiAddress: :9997
+metrics: yes
+metricsAddress: :9998
+
+rtspAddress: :8554
+rtpAddress: :8000
+rtcpAddress: :8001
+rtspTransports: [tcp]
+rtmp: no
+srt: no
+
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigin: '*'
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8189      # ICE over TCP as well: cloud / corporate networks often block UDP
+webrtcIPsFromInterfaces: yes
+# webrtcAdditionalHosts: [command-centre.example.gov.in]
+
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigin: '*'
+hlsVariant: mpegts
+hlsSegmentCount: 5
+hlsSegmentDuration: 1s
+hlsAlwaysRemux: no
+
+# Recording + playback (video archive). Recorded paths are chosen by the adapter service
+# (RECORD_MODE / per-source `record:`); segments land on the relay's local disk as a short
+# buffer and the archiver service copies them to object storage. The playback server cuts
+# event clips out of the buffered segments for the archiver.
+playback: yes
+playbackAddress: :9996
+
+authMethod: http
+authHTTPAddress: http://127.0.0.1:8000/internal/relay-auth   # override: MTX_AUTHHTTPADDRESS
+authHTTPExclude:
+  - action: metrics
+  - action: pprof
+
+pathDefaults:
+  rtspTransport: tcp
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f     # override: MTX_PATHDEFAULTS_RECORDPATH
+  recordFormat: fmp4
+  recordPartDuration: 1s
+  recordSegmentDuration: 60s
+  recordDeleteAfter: 6h
+  # sourceOnDemand / close-after are set per camera path by the adapter service
+
+paths:
+  # Browser compatibility transcode for sources the browser cannot decode (H.265 / HEVC, MPEG-4,
+  # MJPEG): "<camera>/<profile>-h264" is started on demand when the console's WebRTC offer is
+  # rejected with "codecs not supported". Reads the platform's own relay path, so the departmental
+  # source is still pulled only once; recording and the ANPR / analytics workers keep the original.
+  # ~1 CPU core per 1080p stream (libx264 veryfast); only viewers' cameras are transcoded.
+  # NOTE: MediaMTX runs this without a shell: no ${VAR:-default} expansion, only its own $MTX_PATH / $G1 / $RTSP_PORT.
+  "~^([^/]+)/(main|sub)-h264$":
+    source: publisher
+    runOnDemand: >-
+      ffmpeg -loglevel error -rtsp_transport tcp -fflags nobuffer -flags low_delay
+      -i rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/${G1}/${G2}
+      -an -c:v libx264 -preset veryfast -tune zerolatency -profile:v baseline -pix_fmt yuv420p
+      -b:v 2500k -maxrate 2500k -bufsize 1500k -g 30 -bf 0
+      -f rtsp rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/$MTX_PATH
+    runOnDemandRestart: yes
+    runOnDemandStartTimeout: 20s
+    runOnDemandCloseAfter: 10s
+
+  # Compatibility transcode, only started when a browser without H.264 (some Linux Chromium
+  # builds) asks for "<camera>/<profile>-vp8". Reads the platform's own relay path, so the
+  # departmental source is still pulled only once.
+  "~^([^/]+)/(main|sub)-vp8$":
+    source: publisher
+    runOnDemand: >-
+      ffmpeg -loglevel error -rtsp_transport tcp
+      -i rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/${G1}/${G2}
+      -an -c:v libvpx -deadline realtime -cpu-used 8 -b:v 700k -g 30 -vf scale=-2:360
+      -f rtsp rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/$MTX_PATH
+    runOnDemandRestart: yes
+    runOnDemandStartTimeout: 20s
+    runOnDemandCloseAfter: 10s

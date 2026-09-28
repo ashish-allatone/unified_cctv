@@ -1,0 +1,5 @@
+.env
+data/
+__pycache__/
+*.pyc
+deploy/licensing/vendor_private.pem

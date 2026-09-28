@@ -1,0 +1,284 @@
+# Unified CCTV Viewing Platform: full pilot stack.
+#
+#   docker compose --profile sim up -d      # platform + two simulated departmental systems
+#   docker compose up -d                    # platform only (point config/sources.yaml at real VMS)
+#
+# Open http://<host>:8000. For WebRTC from other machines set RELAY_PUBLIC_HOST and
+# MTX_WEBRTCADDITIONALHOSTS to the host's LAN IP / DNS name, and open UDP 8189.
+
+x-platform: &platform
+  build: { context: ., dockerfile: platform/Dockerfile }
+  image: uvp/platform:0.1
+  env_file: .env
+  environment: &platform-env
+    DATABASE_URL: postgresql+psycopg://uvp:${POSTGRES_PASSWORD}@postgres:5432/uvp
+    BUS: kafka
+    KAFKA_BOOTSTRAP: kafka:9092
+    ES_URL: http://elasticsearch:9200
+    API_URL: http://api:8000
+    RELAY_API: http://relay:9997
+    RELAY_RTSP: rtsp://relay:8554
+    RELAY_PLAYBACK: http://relay:9996
+    RELAY_APIS: ${RELAY_APIS:-}
+    RELAY_RTSPS: ${RELAY_RTSPS:-}
+    RELAY_PLAYBACKS: ${RELAY_PLAYBACKS:-}
+    RELAY_PUBLIC_HOSTS: ${RELAY_PUBLIC_HOSTS:-}
+    DATA_DIR: /data
+    RECORDINGS_DIR: /recordings
+    # sources.yaml host overrides for the simulators; replace with real VMS addresses
+    POLICE_NVR_HOST: ${POLICE_NVR_HOST:-sim-police-onvif}
+    POLICE_ONVIF_PORT: ${POLICE_ONVIF_PORT:-18080}
+    MUNI_VMS_URL: ${MUNI_VMS_URL:-http://sim-muni-api:18090}
+  volumes:
+    - uvpdata:/data
+    - ./config:/app/config:ro
+  restart: unless-stopped
+
+services:
+  # ---------------------------------------------------------------- data layer
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: uvp
+      POSTGRES_USER: uvp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U uvp"], interval: 5s, retries: 20 }
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes: [kafkadata:/var/lib/kafka/data]
+    restart: unless-stopped
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"   # pilot on an isolated network; enable TLS + auth for production
+      ES_JAVA_OPTS: -Xms1g -Xmx1g
+    volumes: [esdata:/usr/share/elasticsearch/data]
+    healthcheck: { test: ["CMD-SHELL", "curl -s localhost:9200 >/dev/null"], interval: 10s, retries: 30 }
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- streaming
+  relay:
+    image: bluenviron/mediamtx:1.15.1-ffmpeg
+    env_file: .env
+    environment:
+      MTX_AUTHHTTPADDRESS: http://api:8000/internal/relay-auth
+      MTX_PATHDEFAULTS_RECORDPATH: /recordings/relay/%path/%Y-%m-%d_%H-%M-%S-%f     # <relay>/<camera>/<profile>
+      TZ: UTC               # segment file names are UTC; the archiver relies on it
+      # MTX_WEBRTCADDITIONALHOSTS: 10.10.1.20,cctv.command-centre.local
+    volumes:
+      - ./config/mediamtx.yml:/mediamtx.yml:ro
+      - recordings:/recordings          # short local buffer of recorded segments (RECORD_LOCAL_KEEP)
+    ports:
+      - "8889:8889"        # WebRTC (WHEP) signalling
+      - "8189:8189/udp"    # WebRTC media (UDP preferred)
+      - "8189:8189/tcp"    # WebRTC media over TCP when UDP is blocked (cloud security lists, corporate firewalls)
+      - "8888:8888"        # HLS fallback
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- platform services
+  api:
+    <<: *platform
+    ports: ["8000:8000"]
+    environment:
+      <<: *platform-env
+      ANALYSIS_WORKERS: ${ANALYSIS_WORKERS:-4}      # frames of an uploaded video analysed in parallel (Upload & recognise)
+      ANALYSIS_MAX_FRAMES: ${ANALYSIS_MAX_FRAMES:-900}
+    depends_on: { postgres: { condition: service_healthy }, elasticsearch: { condition: service_healthy }, kafka: { condition: service_started } }
+
+  indexer:
+    <<: *platform
+    command: ["python", "-m", "uvp.services.indexer"]
+    environment: {<<: *platform-env, METRICS_PORT: "9105"}
+    depends_on: { postgres: { condition: service_healthy }, elasticsearch: { condition: service_healthy }, kafka: { condition: service_started } }
+
+  adapters:
+    <<: *platform
+    command: ["python", "-m", "uvp.services.adapter_service"]
+    depends_on: [api, relay]
+    environment: {<<: *platform-env, METRICS_PORT: "9104"}
+
+  anpr:
+    <<: *platform
+    command: ["python", "-m", "uvp.services.anpr_worker"]
+    depends_on: [adapters, kafka]
+    environment:
+      <<: *platform-env
+      ANPR_FPS: "5"
+      ANPR_THREADS: "2"
+      ANPR_WORKERS: ${ANPR_WORKERS:-0}       # cameras processed in parallel (0 = cores / ANPR_THREADS)
+      METRICS_PORT: "9101"
+      ANPR_SHARD: ${ANPR_SHARD:-0/1}     # run several anpr services with 0/2, 1/2 ... to split cameras
+      # ANPR_GPU: "1"   # with an NVIDIA GPU + onnxruntime-gpu image
+    # deploy: { resources: { reservations: { devices: [{ capabilities: [gpu] }] } } }
+
+  analytics:            # zone analytics (intrusion, abandoned object, crowd, parking, red light) on config/analytics.yaml cameras
+    <<: *platform
+    command: ["python", "-m", "uvp.services.analytics_worker"]
+    depends_on: [adapters, api]
+    environment:
+      <<: *platform-env
+      ANALYTICS_FPS: "2"
+      ANALYTICS_THREADS: "2"
+      ANALYTICS_WORKERS: ${ANALYTICS_WORKERS:-0}   # cameras processed in parallel (0 = cores / ANALYTICS_THREADS)
+      ANALYTICS_COUNT_ALL: ${ANALYTICS_COUNT_ALL:-1}   # vehicle + people counting and a crowd alert on every pulled camera
+      CROWD_MAX_PERSONS: ${CROWD_MAX_PERSONS:-25}      # default crowd threshold (persons in view); per camera in analytics.yaml
+      METRICS_PORT: "9102"
+
+  faces:                # persons of interest: face detection + recognition on cameras with `face: true` (config/analytics.yaml)
+    <<: *platform
+    command: ["python", "-m", "uvp.services.face_worker"]
+    depends_on: [adapters, api]
+    environment:
+      <<: *platform-env
+      FACE_FPS: "2"
+      FACE_THREADS: "2"
+      FACE_WORKERS: ${FACE_WORKERS:-0}
+      FACE_MATCH_THRESHOLD: ${FACE_MATCH_THRESHOLD:-0.40}
+      FACE_CAMERAS: ${FACE_CAMERAS:-}
+      METRICS_PORT: "9106"
+    restart: unless-stopped
+
+  hotlist:              # pulls external stolen / wanted vehicle feeds into the watchlist
+    <<: *platform
+    command: ["python", "-m", "uvp.services.hotlist_sync"]
+    depends_on: [api]
+    environment:
+      <<: *platform-env
+      HOTLIST_URL: ${HOTLIST_URL:-http://sim-hotlist:18095/hotlist/stolen}
+
+  archiver:             # copies event clips, plate crops and recorded segments to object storage
+    <<: *platform
+    command: ["python", "-m", "uvp.services.archiver"]
+    depends_on: [api, relay]
+    environment: {<<: *platform-env, METRICS_PORT: "9103"}
+    volumes:
+      - uvpdata:/data
+      - recordings:/recordings:ro
+      - ./config:/app/config:ro
+
+  # ---------------------------------------------------------------- monitoring (--profile monitoring)
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    profiles: [monitoring]
+    volumes:
+      - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - promdata:/prometheus
+    ports: ["9090:9090"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    profiles: [monitoring]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- second relay (--profile ha): cameras are spread over both
+  # and move automatically when one fails. Set in .env:
+  #   RELAY_APIS=relay=http://relay:9997,relay-b=http://relay-b:9997
+  #   RELAY_RTSPS=relay=rtsp://relay:8554,relay-b=rtsp://relay-b:8554
+  #   RELAY_PLAYBACKS=relay=http://relay:9996,relay-b=http://relay-b:9996
+  #   RELAY_PUBLIC_HOSTS=relay=<host A>,relay-b=<host B>      (browsers reach each relay by its own address)
+  relay-b:
+    image: bluenviron/mediamtx:1.15.1-ffmpeg
+    profiles: [ha]
+    env_file: .env
+    environment:
+      MTX_AUTHHTTPADDRESS: http://api:8000/internal/relay-auth
+      MTX_PATHDEFAULTS_RECORDPATH: /recordings/relay-b/%path/%Y-%m-%d_%H-%M-%S-%f
+      TZ: UTC
+    volumes:
+      - ./config/mediamtx.yml:/mediamtx.yml:ro
+      - recordings:/recordings
+    ports:
+      - "18889:8889"
+      - "18189:8189/udp"
+      - "18189:8189/tcp"
+      - "18888:8888"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- TLS front door (--profile tls)
+  proxy:
+    image: caddy:2
+    profiles: [tls]
+    env_file: .env
+    ports: ["443:443", "80:80"]
+    volumes:
+      - ./deploy/tls/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/tls/certs:/certs:ro
+      - caddydata:/data
+    depends_on: [api, relay]
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- simulated departments (--profile sim)
+  sim-media:            # one-off: renders the synthetic traffic footage into the media volume
+    <<: *platform
+    profiles: [sim]
+    restart: "no"
+    command: ["sh", "-c", "test -f /media/police-cam1_main.mp4 || python /app/simulators/traffic_synth.py --out /media --seconds 120"]
+    volumes: [media:/media]
+
+  sim-hotlist:          # NCRB/Vahan-style hotlist feed + e-challan receiver (contract in docs/analytics.md)
+    <<: *platform
+    profiles: [sim]
+    command: ["python", "-m", "uvicorn", "sim_hotlist:app", "--host", "0.0.0.0", "--port", "18095"]
+    working_dir: /app/simulators
+    environment:
+      HOTLIST_API_KEY: ${HOTLIST_API_KEY:-demo}
+      ECHALLAN_WEBHOOK_SECRET: ${ECHALLAN_WEBHOOK_SECRET:-}
+
+  sim-police-video:
+    image: bluenviron/mediamtx:1.15.1-ffmpeg
+    profiles: [sim]
+    environment: { MEDIA_DIR: /media }
+    volumes: [media:/media:ro, ./simulators/dept_a_mediamtx.yml:/mediamtx.yml:ro]
+    depends_on: { sim-media: { condition: service_completed_successfully } }
+
+  sim-police-onvif:
+    <<: *platform
+    profiles: [sim]
+    working_dir: /app/simulators
+    command: ["python", "-m", "uvicorn", "dept_a_police_nvr:app", "--host", "0.0.0.0", "--port", "18080"]
+    environment: { POLICE_RTSP_HOST: sim-police-video, POLICE_RTSP_PORT: "18554", POLICE_ONVIF_PUBLIC: "sim-police-onvif:18080" }
+    volumes: []
+
+  sim-muni-video:
+    image: bluenviron/mediamtx:1.15.1-ffmpeg
+    profiles: [sim]
+    environment: { MEDIA_DIR: /media }
+    volumes: [media:/media:ro, ./simulators/dept_b_mediamtx.yml:/mediamtx.yml:ro]
+    depends_on: { sim-media: { condition: service_completed_successfully } }
+
+  sim-muni-api:
+    <<: *platform
+    profiles: [sim]
+    working_dir: /app/simulators
+    command: ["python", "-m", "uvicorn", "dept_b_municipal_vms:app", "--host", "0.0.0.0", "--port", "18090"]
+    environment: { MUNI_RTSP_HOST: sim-muni-video, MUNI_RTSP_PORT: "28554" }
+    volumes: []
+
+volumes: { pgdata: {}, kafkadata: {}, esdata: {}, uvpdata: {}, media: {}, recordings: {}, caddydata: {}, promdata: {}, grafanadata: {} }
