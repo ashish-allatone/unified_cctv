@@ -114,6 +114,7 @@ nav#tabs button.active { background: var(--accent-soft); color: var(--text); bor
 nav#tabs button.active svg { opacity: 1; color: var(--accent); }
 .sidebar .side-foot { padding: 10px 8px; border-top: 1px solid var(--line); display: grid; gap: 6px; }
 .sidebar .side-foot .btn { justify-content: flex-start; width: 100%; white-space: nowrap; overflow: hidden; }
+.sidebar .side-top { border-top: 0; border-bottom: 1px solid var(--line); }
 #app.rail .sidebar .brand .name, #app.rail nav#tabs .group, #app.rail nav#tabs button span, #app.rail .side-foot .btn .lbl { display: none; }
 #app.rail nav#tabs button { justify-content: center; padding: 10px; }
 #app.rail .side-foot .btn { justify-content: center; }

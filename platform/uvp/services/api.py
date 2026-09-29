@@ -1301,15 +1301,22 @@ app.include_router(devices_router)
 
 
 # ----------------------------------------------------------------------------- web UI
+# The React console (platform/webapp) builds into WEB_DIR: `npm run build`, or the Dockerfile's console stage.
+# Without a build, the static files (field app /m/, /i18n, /brand) are still served from webapp/public.
 WEB = Path(settings.web_dir)
-if WEB.exists():
+WEB_PUBLIC = Path(settings.web_dir).parent / "webapp" / "public"
+if (WEB / "index.html").exists():
     @app.get("/", include_in_schema=False)
     def _index():
-        """Console entry: assets carry the build version so a new build is never served from a stale browser cache."""
+        """Console entry. Built assets carry content hashes, so only index.html must never come from a stale cache."""
         from fastapi import Response
-        html = (WEB / "index.html").read_text(encoding="utf-8")
-        v = settings.version
-        html = html.replace('href="styles.css"', f'href="styles.css?v={v}"').replace('src="app.js"', f'src="app.js?v={v}"')
-        return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
+        return Response((WEB / "index.html").read_text(encoding="utf-8"), media_type="text/html", headers={"Cache-Control": "no-store"})
 
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
+elif WEB_PUBLIC.exists():
+    @app.get("/", include_in_schema=False)
+    def _index_unbuilt():
+        from fastapi import Response
+        return Response("Operator console not built: run `npm install && npm run build` in platform/webapp.", media_type="text/plain", status_code=503)
+
+    app.mount("/", StaticFiles(directory=WEB_PUBLIC, html=True), name="web")
