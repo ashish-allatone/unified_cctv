@@ -1,0 +1,48 @@
+/* Sidebar sections: view id, i18n key, English label, required feature, icon. */
+const I = ({ children }) => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">{children}</svg>;
+
+export const ICONS = {
+  overview: <I><rect x="3" y="3" width="8" height="8" rx="2" /><rect x="13" y="3" width="8" height="5" rx="2" /><rect x="13" y="11" width="8" height="10" rx="2" /><rect x="3" y="14" width="8" height="7" rx="2" /></I>,
+  wall: <I><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M12 4v13M3 10.5h18M8 21h8" /></I>,
+  map: <I><path d="M12 21s6-5.5 6-11a6 6 0 0 0-12 0c0 5.5 6 11 6 11z" /><circle cx="12" cy="10" r="2.2" /></I>,
+  registry: <I><path d="M4 5h16v4H4zM4 10h16v4H4zM4 15h16v4H4z" /><path d="M7 7h.01M7 12h.01M7 17h.01" /></I>,
+  alerts: <I><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z" /><path d="M10 20a2 2 0 0 0 4 0" /></I>,
+  counts: <I><path d="M4 19V10M10 19V5M16 19v-8M22 19H2" /></I>,
+  search: <I><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></I>,
+  movement: <I><path d="M4 18c4-1 5-6 9-7s5 4 7 3" /><circle cx="4" cy="18" r="1.6" /><circle cx="20" cy="14" r="1.6" /></I>,
+  playback: <I><circle cx="12" cy="12" r="9" /><path d="M10 8.5v7l5.5-3.5z" fill="currentColor" stroke="none" /></I>,
+  cases: <I><path d="M4 7h16v12H4zM9 7V5h6v2M4 12h16" /></I>,
+  violations: <I><path d="M12 3 2.5 20h19z" /><path d="M12 9v5M12 17h.01" /></I>,
+  watchlist: <I><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" /><circle cx="12" cy="12" r="2.6" /></I>,
+  upload: <I><path d="M12 16V4M7 9l5-5 5 5" /><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></I>,
+  sources: <I><rect x="3" y="4" width="18" height="6" rx="1.5" /><rect x="3" y="14" width="18" height="6" rx="1.5" /><path d="M7 7h.01M7 17h.01" /></I>,
+  audit: <I><path d="M6 3h9l4 4v14H6z" /><path d="M9 12h7M9 16h7M9 8h3" /></I>,
+  admin: <I><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></I>,
+  sun: <I><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></I>,
+  moon: <I><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></I>,
+  menu: <I><path d="M4 7h16M4 12h16M4 17h16" /></I>,
+  collapse: <I><path d="M4 7h10M4 12h7M4 17h10" /><path d="m20 9-3 3 3 3" /></I>,
+  speaker: <I><path d="M4 10v4h3l4 3.5v-11L7 10z" /><path className="spk-waves" d="M15 9.5a3.5 3.5 0 0 1 0 5M17.5 7a7 7 0 0 1 0 10" /></I>,
+};
+
+export const NAV = [
+  { group: "Operations" },
+  { view: "overview", key: "nav.overview", label: "Overview" },
+  { view: "wall", key: "nav.wall", label: "Video wall" },
+  { view: "map", key: "nav.map", label: "Map" },
+  { view: "registry", key: "nav.registry", label: "Registry", feature: "registry" },
+  { view: "alerts", key: "nav.alerts", label: "Alerts", badge: true },
+  { view: "counts", key: "nav.counts", label: "Counts" },
+  { group: "Investigate" },
+  { view: "search", key: "nav.search", label: "Search", feature: "search" },
+  { view: "movement", key: "nav.movement", label: "Vehicle movement", feature: "movement" },
+  { view: "playback", key: "nav.playback", label: "Playback", feature: "playback" },
+  { view: "cases", key: "nav.cases", label: "Cases", feature: "cases" },
+  { view: "violations", key: "nav.violations", label: "Violations", feature: "search" },
+  { view: "watchlist", key: "nav.watchlist", label: "Watchlist", feature: "search" },
+  { view: "upload", key: "nav.upload", label: "Upload & recognise", feature: "search" },
+  { group: "System" },
+  { view: "sources", key: "nav.sources", label: "Sources", feature: "sources" },
+  { view: "audit", key: "nav.audit", label: "Audit", feature: "audit" },
+  { view: "admin", key: "nav.admin", label: "Admin", feature: "admin" },
+];

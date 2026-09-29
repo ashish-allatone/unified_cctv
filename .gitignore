@@ -3,3 +3,6 @@ data/
 __pycache__/
 *.pyc
 deploy/licensing/vendor_private.pem
+# operator console build output (npm run build in platform/webapp) and its dependencies
+platform/web/
+node_modules/

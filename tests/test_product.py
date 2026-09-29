@@ -160,15 +160,16 @@ def test_plate_review_corrections_and_weekly_report(client):
 
 # ----------------------------------------------------------------------------- i18n, scripts, PWA lang
 def test_i18n_dictionaries_complete_and_served(client):
-    en = json.loads((ROOT / "platform" / "web" / "i18n" / "en.json").read_text(encoding="utf-8"))
-    hi = json.loads((ROOT / "platform" / "web" / "i18n" / "hi.json").read_text(encoding="utf-8"))
+    web = ROOT / "platform" / "webapp"
+    en = json.loads((web / "public" / "i18n" / "en.json").read_text(encoding="utf-8"))
+    hi = json.loads((web / "public" / "i18n" / "hi.json").read_text(encoding="utf-8"))
     assert set(en) == set(hi) and all(v.strip() for v in hi.values())
-    html = (ROOT / "platform" / "web" / "index.html").read_text()
+    src = "\n".join(p.read_text(encoding="utf-8") for p in (web / "src").rglob("*.js*"))
     import re
-    keys = set(re.findall(r'data-i18n="([^"]+)"', html)) | set(re.findall(r'data-i18n-placeholder="([^"]+)"', html))
-    assert keys <= set(en), keys - set(en)
+    keys = set(re.findall(r'\bt\("([a-z_]+\.[a-z_.]+)"', src)) | set(re.findall(r'\bkey: "([a-z_]+\.[a-z_]+)"', src))
+    assert keys and keys <= set(en), keys - set(en)
     assert client.get("/i18n/hi.json").status_code == 200
-    assert 'role="status"' in html and 'class="skip-link"' in html and 'aria-label="Close"' in html
+    assert 'role="status"' in src and 'className="skip-link"' in src and 'aria-label="Close"' in src
 
 
 def test_installer_scripts_are_valid_shell():
