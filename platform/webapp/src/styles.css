@@ -1,6 +1,3 @@
-/* Unified CCTV Viewer — console design system
-   Two themes driven by data-theme on <html>: "dark" (command centre, default) and "light" (portal / reports).
-   Every colour is a token; components never hard-code colours except the video wall, which is black in both. */
 
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
