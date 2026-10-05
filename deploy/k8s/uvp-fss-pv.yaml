@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: uvp-data-fss-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: unified-cctv-fss-data
+  mountOptions:
+    - nfsvers=4.1
+  csi:
+    driver: fss.csi.oraclecloud.com
+    volumeHandle: ocid1.filesystem.oc1.ap_mumbai_1.aaaaaaaaaapok62ymjxw2llqojxwiotboaww25lnmjqwsljrfvqwiljr:10.0.1.140:/uvp-data
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: uvp-recordings-fss-pv
+spec:
+  capacity:
+    storage: 400Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: unified-cctv-fss-recordings
+  mountOptions:
+    - nfsvers=4.1
+  csi:
+    driver: fss.csi.oraclecloud.com
+    volumeHandle: ocid1.filesystem.oc1.ap_mumbai_1.aaaaaaaaaapok62ymjxw2llqojxwiotboaww25lnmjqwsljrfvqwiljr:10.0.1.140:/uvp-recordings
