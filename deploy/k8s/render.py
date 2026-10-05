@@ -29,7 +29,7 @@ def env_common(v: dict, extra: dict | None = None) -> list[dict]:
     rtsps = ",".join(f"relay-{i}=rtsp://relay-{i}.relay.{v['namespace']}.svc:8554" for i in range(v["relays"]))
     pbs = ",".join(f"relay-{i}=http://relay-{i}.relay.{v['namespace']}.svc:9996" for i in range(v["relays"]))
     hosts = ",".join(f"relay-{i}={v['publicHost']}" for i in range(v["relays"]))
-    base = {"DATABASE_URL": v["database_url"], "BUS": "kafka", "KAFKA_BOOTSTRAP": v["kafka_bootstrap"], "ES_URL": v["es_url"],
+    base = {"BUS": "kafka", "KAFKA_BOOTSTRAP": v["kafka_bootstrap"], "ES_URL": v["es_url"], #change
             "API_URL": "http://api:8000", "RELAY_APIS": relays, "RELAY_RTSPS": rtsps, "RELAY_PLAYBACKS": pbs, "RELAY_PUBLIC_HOSTS": hosts,
             "RELAY_PUBLIC_BASE": f"https://{v['publicHost']}/relay", "DATA_DIR": "/data", "RECORDINGS_DIR": "/recordings",
             "OBJECT_STORAGE": "s3", "S3_ENDPOINT": v["object_storage"]["endpoint"], "S3_REGION": v["object_storage"]["region"],
