@@ -74,10 +74,30 @@ def render(v: dict) -> list[dict]:
     docs.append({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "uvp-secrets", "namespace": ns}, "type": "Opaque",
                  "stringData": {k: "CHANGE-ME" for k in ("token-secret", "internal-secret", "relay-internal-pass", "s3-access-key",
                                                           "s3-secret-key", "police-onvif-pass", "muni-api-pass")}})
-    for name, size in (("uvp-data", "50Gi"), ("uvp-recordings", f"{v['relayRecordingsGb'] * v['relays']}Gi")):
-        docs.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": {"name": name, "namespace": ns},
-                     "spec": {"accessModes": ["ReadWriteMany"], "storageClassName": v["storageClass"], "resources": {"requests": {"storage": size}}}})
-    # api
+  #--- comment--
+  
+  #for name, size in (("uvp-data", "50Gi"), ("uvp-recordings", f"{v['relayRecordingsGb'] * v['relays']}Gi")):
+     #   docs.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": {"name": name, "namespace": ns},
+      #               "spec": {"accessModes": ["ReadWriteMany"], "storageClassName": v["storageClass"], "resources": {"requests": {"storage": size}}}})
+    
+  #add new value
+  for name, size, storage_class, volume_name in (
+    ("uvp-data", "50Gi", "unified-cctv-fss-data", "uvp-data-fss-pv"),
+    ("uvp-recordings", f"{v['relayRecordingsGb'] * v['relays']}Gi", "unified-cctv-fss-recordings", "uvp-recordings-fss-pv"),
+):
+    docs.append({
+        "apiVersion": "v1",
+        "kind": "PersistentVolumeClaim",
+        "metadata": {"name": name, "namespace": ns},
+        "spec": {
+            "accessModes": ["ReadWriteMany"],
+            "storageClassName": storage_class,
+            "volumeName": volume_name,
+            "resources": {"requests": {"storage": size}},
+        },
+    })
+  
+  # api
     docs.append(deployment(v, "api", ["python", "-m", "uvicorn", "uvp.services.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"],
                            v["api"], {"METRICS_PORT": "0"}, ports=[8000]))
     docs.append({"apiVersion": "v1", "kind": "Service", "metadata": {"name": "api", "namespace": ns},
