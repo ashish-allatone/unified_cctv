@@ -256,7 +256,7 @@ def render(v: dict) -> list[dict]:
     relay = {"apiVersion": "apps/v1", "kind": "StatefulSet", "metadata": {"name": "relay", "namespace": ns},
              "spec": {"serviceName": "relay", "replicas": v["relays"], "selector": {"matchLabels": {"app": "relay"}},
                       "template": {"metadata": {"labels": {"app": "relay"}},
-                                   "spec": {"containers": [{"name": "mediamtx", "image": ""image": "docker.io/bluenviron/mediamtx:1.15.1-ffmpeg",
+                                   "spec": {"containers": [{"name": "mediamtx", "image": "docker.io/bluenviron/mediamtx:1.15.1-ffmpeg",
                                                             "env": [{"name": "MTX_AUTHHTTPADDRESS", "value": "http://api:8000/internal/relay-auth"},
                                                                     {"name": "TZ", "value": "UTC"},
                                                                     {"name": "MTX_PATHDEFAULTS_RECORDPATH", "value": "/recordings/$(POD_NAME)/%path/%Y-%m-%d_%H-%M-%S-%f"},
