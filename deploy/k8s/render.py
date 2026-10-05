@@ -484,7 +484,8 @@ def render(v: dict) -> list[dict]:
                     "containers": [
                         {
                             "name": "mediamtx",
-                            "image": "bluenviron/mediamtx:1.15.1-ffmpeg",
+                            #"image": "bluenviron/mediamtx:1.15.1-ffmpeg",
+                            "image": "docker.io/bluenviron/mediamtx:1.15.1-ffmpeg",
                             "env": [
                                 {
                                     "name": "MTX_AUTHHTTPADDRESS",
