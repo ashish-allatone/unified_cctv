@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uvp-data
+  namespace: unified-cctv
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: unified-cctv-fss-data
+  resources:
+    requests:
+      storage: 50Gi
+  volumeName: uvp-data-fss-pv
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uvp-recordings
+  namespace: unified-cctv
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: unified-cctv-fss-recordings
+  resources:
+    requests:
+      storage: 400Gi
+  volumeName: uvp-recordings-fss-pv
