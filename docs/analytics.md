@@ -254,3 +254,15 @@ opens a capture on any other camera: that would start a new session on the depar
 source's cap. The image-quality sampler uses the frames the worker already has (it used to open every camera's
 stream in turn every 5 minutes, which stalled counting for minutes and logged in to the gateway once per camera
 per round — the cause of "counts for a while, then stops"). *Counts → status line* shows the selected set.
+
+## The detection switch (run AI only when you want it)
+
+The header button **Detection: ON / OFF** (supervisor and admin) starts and stops all AI detection — ANPR,
+vehicle / people counting, crowd alerts and face matching — on every camera. Per camera: hover a tile →
+**Detect** → *Detect on this camera* / *Stop on this camera* / *Follow global switch*, so a few cameras can run
+while the rest are idle (or the other way round). Workers pick the change up within 5 seconds, drop frames
+while OFF (no inference, no CPU), and the tiles show *AI on / AI off*. The state is stored in the database, so
+it survives restarts; `DETECTION_DEFAULT=off` in `.env` makes a fresh install start with detection off until
+the button is pressed. Every press is audited (`detection_switch`). API: `GET/POST /api/detection`
+(`{enabled}` or `{camera_id, on}`; `on: null` returns a camera to the global switch). The wall's *Show boxes*
+checkbox only hides the overlay drawing — it does not stop detection.

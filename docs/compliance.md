@@ -33,7 +33,7 @@ names the file that implements it so an auditor can check rather than trust.
 | --- | --- |
 | Purpose limitation | Plate reads are used for traffic enforcement / public safety only; no face recognition module is enabled |
 | Data minimisation | Only metadata, plate crops, an annotated frame and a short clip are kept; departmental recordings stay in their VMS |
-| Retention and purge | `config/rules.yaml → retention` per department: recordings, clips, crops, events, audit; applied hourly by the archiver |
+| Retention and purge | Archival policies per data class and department (Admin → Archival; defaults from `config/rules.yaml → retention`): keep-days, delete or archive-to-cold, legal holds exempt, nightly run + run history; see `docs/console.md` |
 | Legal hold | `legal_holds` by plate / camera(+window) / event / case: excluded from purge and erasure |
 | Right to information (s.11) | `/api/dpdp/subject-access?plate=` |
 | Right to erasure (s.12) | `/api/dpdp/erase?plate=` (refused under legal hold or watchlist); erases DB rows, index entries and archive objects |

@@ -4,6 +4,7 @@ from .base import Adapter
 from .onvif import OnvifAdapter
 from .rtsp import RtspAdapter
 from .rtsp_template import RtspTemplateAdapter
+from .push import PushAdapter
 from .sdk_bridge import SdkBridgeAdapter
 from .vendor_rest import VendorRestAdapter
 
@@ -12,6 +13,7 @@ ADAPTERS: dict[str, type[Adapter]] = {
     "vendor_rest": VendorRestAdapter,
     "rtsp": RtspAdapter,
     "rtsp_template": RtspTemplateAdapter,
+    "push": PushAdapter,
     "sdk_bridge": SdkBridgeAdapter,
 }
 

@@ -31,6 +31,8 @@ DEVICE_TYPES = {
                  "help": "Any recorder or gateway whose URLs follow a pattern per channel, e.g. rtsp://{host}:{rtsp_port}/stream/cam{channel:02d} (Corp8)."},
     "onvif":    {"label": "ONVIF Profile S device", "adapter": "onvif",
                  "help": "Discovers channels and stream URLs through ONVIF (port 80 by default)."},
+    "push":     {"label": "Remote site (site connector pushes the streams)", "adapter": "push",
+                 "help": "For a DVR / NVR behind a client's router with no port forwarding: a small connector box on the site's LAN reads the recorder and pushes the streams to this server over one outbound connection. Save, then download the connector bundle and run it at the site."},
 }
 
 
@@ -72,6 +74,16 @@ def build_config(d: dict) -> dict:
     if d.get("persistent_pull") is not None:
         cfg["persistent_pull"] = bool(d["persistent_pull"])
     host = (d.get("host") or "").strip()
+    if kind == "push":
+        n = int(d.get("channels") or 1)
+        if not 1 <= n <= 512:
+            raise ValueError("channels must be 1-512")
+        prefix = d.get("id_prefix") or slug(name)
+        cfg["cameras"] = {f"{prefix}-ch{i + 1}": {"name": f"{name} ch{i + 1}", **({"anpr": True} if d.get("anpr") else {})} for i in range(n)}
+        cfg["site"] = {"vendor": (d.get("vendor") or "cpplus").strip().lower(), "host": host, "rtsp_port": int(d.get("rtsp_port") or 554),
+                       "main_template": (d.get("main_template") or "").strip()}       # remembered for the connector bundle
+        cfg["max_concurrent_pulls"] = n
+        return cfg
     if kind == "camera":
         main = (d.get("main_url") or "").strip()
         if not main.startswith("rtsp://"):
@@ -188,6 +200,8 @@ def db_sources() -> list[dict]:
             cfg = dict(r.config or {})
             u, p = decrypt_secret(r.secret_enc)
             cfg.update({"id": r.id, "department": r.department, "name": r.name, "username": u, "password": p})
+            if cfg.get("adapter") == "push":
+                cfg["publish_key"] = cfg.pop("password", "")   # the site connector's key lives in the encrypted secret
             out.append(cfg)
         return out
 
@@ -207,7 +221,7 @@ def public_row(r: Source) -> dict:
             "status_detail": r.status_detail, "checked_at": r.checked_at.isoformat() if r.checked_at else None,
             "max_concurrent_pulls": r.max_concurrent_pulls, "config": cfg, "username": u, "created_by": r.created_by,
             "updated_at": r.updated_at.isoformat() if r.updated_at else None, "managed": bool(r.managed),
-            "channels": len(cfg.get("channels") or cfg.get("streams") or [])}
+            "channels": len(cfg.get("channels") or cfg.get("streams") or cfg.get("cameras") or [])}
 
 
 def save_device(d: dict, user: str, device_id: str | None = None) -> Source:
@@ -228,13 +242,108 @@ def save_device(d: dict, user: str, device_id: str | None = None) -> Source:
             r = Source(id=sid, status="unknown", status_detail="connecting…", created_by=user, managed=True)
             s.add(r)
             username, password = d.get("username") or "", d.get("password") or ""
+            if cfg["adapter"] == "push":
+                import secrets as _secrets
+                username, password = "site", _secrets.token_urlsafe(24)      # the connector's publish key
         r.department, r.name, r.adapter = cfg["department"], cfg["name"], cfg["adapter"]
         r.max_concurrent_pulls = cfg["max_concurrent_pulls"]
         r.config = cfg
         r.secret_enc = encrypt_secret(username or "", password or "")
         r.updated_at = utcnow()
-        r.status, r.status_detail = "unknown", "connecting… (the adapters pick this up within a few seconds)"
+        r.status, r.status_detail = "unknown", ("waiting for the site connector to push its streams" if cfg["adapter"] == "push"
+                                                else "connecting… (the adapters pick this up within a few seconds)")
         s.commit()
         s.refresh(r)
         s.expunge(r)
         return r
+
+
+# ----------------------------------------------------------------------------- site connector bundle
+def site_connector_bundle(r: Source, public_host: str) -> dict[str, str]:
+    """Files for the box at the client's site: docker-compose.yml + cameras.txt + README. The box reads the
+    recorder over its LAN and pushes every channel to this server's relay (RTSP 8554, outbound only)."""
+    from ..adapters.registry import presets
+    cfg = dict(r.config or {})
+    _u, key = decrypt_secret(r.secret_enc)
+    site = cfg.get("site") or {}
+    vendor = site.get("vendor") or "cpplus"
+    tpl = site.get("main_template") or (presets().get(vendor) or {}).get("main") or "rtsp://{host}:{rtsp_port}/cam/realmonitor?channel={channel}&subtype=0"
+    host, port = site.get("host") or "DVR-LAN-IP", site.get("rtsp_port") or 554
+    lines = []
+    for i, cid in enumerate(cfg.get("cameras") or {}):
+        src = tpl.format(host="${DVR_HOST}", rtsp_port=port, channel=i + 1)
+        lines.append(f"{cid}/main|{src}")
+    cameras_txt = "# <relay path>|<recorder stream URL>   (user:pass are added from DVR_USER / DVR_PASS in .env)\n" + "\n".join(lines) + "\n"
+    env = (f"RELAY_HOST={public_host}\nRELAY_PORT=8554\nSITE_KEY={key}\nDVR_HOST={host}\nDVR_USER=uvp\nDVR_PASS=CHANGE-ME\n")
+    compose = """# Unified CCTV site connector: reads the recorder on this LAN and pushes each channel to the command centre.
+# Needs: Docker on any small PC / mini-PC / Raspberry Pi 4 at the site; outbound TCP 8554 to the server. No inbound ports.
+services:
+  connector:
+    image: bluenviron/mediamtx:1.15.1-ffmpeg
+    entrypoint: ["/bin/sh", "/connector/run.sh"]
+    env_file: .env
+    volumes: [".:/connector:ro"]
+    restart: unless-stopped
+"""
+    run_sh = r"""#!/bin/sh
+# one ffmpeg per camera, copying the stream (no re-encode) to the relay; restarts on any failure
+cd /connector
+push() {
+  path="$1"; src="$2"
+  auth_src=$(echo "$src" | sed "s#rtsp://#rtsp://${DVR_USER}:${DVR_PASS}@#")
+  while true; do
+    echo "$(date '+%H:%M:%S') $path: pushing"
+    ffmpeg -nostdin -loglevel warning -rtsp_transport tcp -i "$auth_src" -c copy -an -f rtsp -rtsp_transport tcp       "rtsp://site:${SITE_KEY}@${RELAY_HOST}:${RELAY_PORT}/$path"
+    echo "$(date '+%H:%M:%S') $path: ended, retry in 5 s"; sleep 5
+  done
+}
+grep -v '^#' cameras.txt | grep '|' | while IFS='|' read -r path src; do
+  src=$(echo "$src" | sed "s#\${DVR_HOST}#${DVR_HOST}#")
+  push "$path" "$src" &
+  sleep 1
+done
+wait
+"""
+    readme = f"""Unified CCTV site connector for '{r.name}' ({r.id})
+
+1. Copy this folder to a small PC on the same network as the recorder (Docker installed).
+2. Edit .env: DVR_HOST (recorder LAN IP), DVR_USER / DVR_PASS (a viewer-only user on the recorder).
+   RELAY_HOST and SITE_KEY are already filled in. Keep SITE_KEY secret - it lets this site publish its cameras.
+3. Check cameras.txt: one line per channel (path|stream URL). Remove channels you do not want to send.
+4. Run:  docker compose up -d      (logs: docker compose logs -f)
+The cameras appear on the command centre's wall within ~10 s and are recorded / analysed there.
+Only outbound TCP {public_host}:8554 is used; nothing is opened on the site's router.
+"""
+    run_ps1 = r"""# Unified CCTV site connector for Windows (no Docker): one ffmpeg per camera, restarted on failure.
+# 1. Put ffmpeg.exe next to this file (https://www.gyan.dev/ffmpeg/builds/ -> "ffmpeg-release-essentials.zip" -> bin\ffmpeg.exe)
+# 2. Edit .env (DVR_HOST, DVR_USER, DVR_PASS)   3. Right-click run.ps1 -> Run with PowerShell (keep the window open)
+# To start automatically at boot: Task Scheduler -> Create Basic Task -> At log on -> Start a program:
+#    powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "<path>\run.ps1"
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $here
+$env_ = @{}
+Get-Content .env | Where-Object { $_ -match '=' -and $_ -notmatch '^#' } | ForEach-Object { $k, $v = $_ -split '=', 2; $env_[$k.Trim()] = $v.Trim() }
+$ffmpeg = Join-Path $here 'ffmpeg.exe'
+if (-not (Test-Path $ffmpeg)) { Write-Host 'ffmpeg.exe not found next to run.ps1 - see step 1'; Read-Host 'press Enter'; exit 1 }
+$jobs = @()
+Get-Content cameras.txt | Where-Object { $_ -match '\|' -and $_ -notmatch '^#' } | ForEach-Object {
+  $path, $src = $_ -split '\|', 2
+  $src = $src.Replace('${DVR_HOST}', $env_['DVR_HOST']).Replace('rtsp://', "rtsp://$($env_['DVR_USER']):$($env_['DVR_PASS'])@")
+  $dst = "rtsp://site:$($env_['SITE_KEY'])@$($env_['RELAY_HOST']):$($env_['RELAY_PORT'])/$path"
+  $jobs += Start-Job -ArgumentList $ffmpeg, $src, $dst, $path -ScriptBlock {
+    param($ff, $src, $dst, $path)
+    while ($true) {
+      Write-Output "$(Get-Date -Format HH:mm:ss) $path pushing"
+      & $ff -nostdin -loglevel warning -rtsp_transport tcp -i $src -c copy -an -f rtsp -rtsp_transport tcp $dst
+      Write-Output "$(Get-Date -Format HH:mm:ss) $path ended, retry in 5 s"; Start-Sleep 5
+    }
+  }
+  Start-Sleep 1
+}
+Write-Host "Pushing $($jobs.Count) camera(s) to $($env_['RELAY_HOST']). Leave this window open. Ctrl+C stops."
+while ($true) { $jobs | Receive-Job; Start-Sleep 5 }
+"""
+    readme += """
+Windows without Docker: use run.ps1 instead of docker compose (instructions at the top of run.ps1).
+"""
+    return {"docker-compose.yml": compose, "run.sh": run_sh, "run.ps1": run_ps1, "cameras.txt": cameras_txt, ".env": env, "README.txt": readme}

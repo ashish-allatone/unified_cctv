@@ -1,15 +1,6 @@
 # One image for all platform services (api, indexer, adapters, anpr) and the simulators.
-
-# Operator console (React + Vite), built here so the runtime image needs no Node. Output: platform/web.
-FROM node:24-alpine AS console
-WORKDIR /src/platform/webapp
-COPY platform/webapp/package*.json ./
-RUN npm install --no-audit --no-fund
-COPY platform/webapp/ ./
-RUN npm run build
-
 FROM python:3.11-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libgl1 libglib2.0-0 fonts-dejavu-core curl \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libgl1 libglib2.0-0 fonts-dejavu-core curl espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY platform/requirements.txt /app/platform/requirements.txt
@@ -17,7 +8,6 @@ RUN pip install --no-cache-dir -r /app/platform/requirements.txt
 # Download ANPR models at build time so the command-centre network needs no internet access.
 RUN python -c "from fast_alpr import ALPR; ALPR(detector_model='yolo-v9-t-384-license-plate-end2end', ocr_model='cct-s-v2-global-model')"
 COPY platform /app/platform
-COPY --from=console /src/platform/web /app/platform/web
 # Bundled COCO detector (Apache-2.0). Fetched here only if the build context lacks it, so a copy made
 # without the .onnx still builds a working analytics worker.
 RUN test -f /app/platform/models/yolox_nano.onnx || (mkdir -p /app/platform/models && curl -fsSL -o /app/platform/models/yolox_nano.onnx \

@@ -20,6 +20,7 @@ from sqlalchemy import select
 from .. import auth as A
 from ..adapters.registry import presets
 from ..db import Camera, SessionLocal, Source, audit
+from ..inbox import push
 from ..relay import path_name, relay
 from . import devices as D
 from .deps import _ip, need
@@ -103,6 +104,8 @@ def create_device(body: DeviceBody, request: Request, u: A.User = Depends(need("
         raise HTTPException(400, str(e))
     with SessionLocal() as s:
         audit(s, u.username, "device_connect", r.id, f"{r.adapter} {d.get('vendor') or ''} {d.get('host') or d.get('main_url') or ''} ({r.department})".strip(), _ip(request))
+        push("device", f"Device connected: {d.get('name') or r.id}", f"{r.adapter} {d.get('vendor') or ''} {d.get('host') or ''} · {r.department} · by {u.username}".strip(),
+             department=r.department, ref_id=r.id, link="sources", feature="sources", session=s)
         s.commit()
     return D.public_row(r)
 
@@ -118,6 +121,8 @@ def update_device(sid: str, body: DeviceBody, request: Request, u: A.User = Depe
         raise HTTPException(400, str(e))
     with SessionLocal() as s:
         audit(s, u.username, "device_update", sid, f"{r.adapter} {d.get('host') or ''}", _ip(request))
+        push("device", f"Device changed: {d.get('name') or sid}", f"{r.adapter} {d.get('host') or ''} · by {u.username}".strip(), department=r.department,
+             ref_id=sid, link="sources", feature="sources", session=s)
         s.commit()
     return D.public_row(r)
 
@@ -138,5 +143,29 @@ def delete_device(sid: str, request: Request, u: A.User = Depends(need("admin"))
             s.delete(c)
         s.delete(r)
         audit(s, u.username, "device_disconnect", sid, f"{len(cams)} camera(s) removed", _ip(request))
+        push("device", f"Device disconnected: {r.name or sid}", f"{len(cams)} camera(s) removed · by {u.username}", department=r.department, severity="warn",
+             ref_id=sid, link="sources", feature="sources", session=s)
         s.commit()
     return {"ok": True, "cameras_removed": len(cams)}
+
+
+@router.get("/api/devices/{sid}/site-connector.zip")
+def site_connector(sid: str, request: Request, u: A.User = Depends(need("admin"))):
+    """The site-connector bundle for a push device (docker-compose + cameras list + key), as a zip."""
+    import io
+    import zipfile
+    from fastapi.responses import Response
+    with SessionLocal() as s:
+        r = s.get(Source, sid)
+        if r is None or not r.managed or (r.config or {}).get("adapter") != "push":
+            raise HTTPException(404, "no such push device")
+        host = relay.get(None).public_host or request.headers.get("x-forwarded-host", "").split(":")[0] or request.url.hostname or "SERVER-IP"
+        files = D.site_connector_bundle(r, host)
+        audit(s, u.username, "device_bundle", sid, "site connector downloaded", _ip(request))
+        s.commit()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, body in files.items():
+            z.writestr(f"site-connector-{sid}/{name}", body)
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename=site-connector-{sid}.zip"})

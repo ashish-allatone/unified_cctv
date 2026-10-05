@@ -76,6 +76,16 @@ class LocalStore:
         if p.exists():
             p.unlink()
 
+    def copy(self, src: str, dst: str) -> bool:
+        """Copy one object inside the store (archival to the cold prefix). False when the source is missing."""
+        sp = self._p(src)
+        if not sp.exists():
+            return False
+        dp = self._p(dst)
+        dp.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(sp, dp)
+        return True
+
 
 def _s3_config():
     """boto3 >= 1.36 sends uploads as aws-chunked with CRC32 checksums by default; Oracle Object Storage,
@@ -156,6 +166,16 @@ class S3Store:
         for i in range(0, len(keys), 1000):
             chunk = [{"Key": self._k(k)} for k in keys[i:i + 1000]]
             self.client.delete_objects(Bucket=self.bucket, Delete={"Objects": chunk, "Quiet": True})
+
+    def copy(self, src: str, dst: str) -> bool:
+        """Server-side copy (no download) to the cold prefix; False when the source object is missing."""
+        try:
+            extra = {"ServerSideEncryption": settings.s3_sse} if settings.s3_sse else {}
+            self.client.copy_object(Bucket=self.bucket, Key=self._k(dst), CopySource={"Bucket": self.bucket, "Key": self._k(src)},
+                                    StorageClass=settings.s3_cold_class or "STANDARD", **extra)
+            return True
+        except self.client.exceptions.ClientError:
+            return False
 
 
 _store = None

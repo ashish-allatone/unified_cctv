@@ -16,7 +16,8 @@ sources:
     main: "rtsp://{host}:{rtsp_port}/stream/cam{channel:02d}"
     username_env: CORP8_USER                  # registered email (.env)
     password_env: CORP8_PASS                  # access password (.env)
-    max_concurrent_pulls: 30                  # the relay pulls each camera once, however many operators watch
+    max_concurrent_pulls: 10
+    persistent_pull: true
     channels:                                 # names from the Live Grid; cam21-cam30 names to fill in; anpr on plate-facing views
       - {channel: 1, id: cam01, name: "Chiman bhai Bridge", anpr: true}
       - {channel: 2, id: cam02, name: "Janpath"}

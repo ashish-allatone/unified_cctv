@@ -45,7 +45,7 @@ from .. import auth as A
 from ..config import settings
 from ..db import (AccessGrant, AnprEvent, Alert, AuditLog, Camera, EventTag, LegalHold, Recording, SessionLocal,
                   Source, Users, WatchlistEntry, audit, init_db, new_id, utcnow, verify_audit_chain)
-from .. import pii, rbac, signing
+from .. import inbox, pii, rbac, signing
 from ..notify import notify
 from .. import metrics as M
 from ..plates import correct, normalise
@@ -92,7 +92,10 @@ class Hub:
     async def send(self, msg: dict) -> None:
         dead = []
         for ws, u in list(self.clients.items()):
-            if not u.sees(msg.get("department", "")):
+            dept = msg.get("department", "")
+            if dept not in ("", "*") and not u.sees(dept):
+                continue
+            if msg.get("type") == "inbox" and msg.get("feature") and not u.has(msg["feature"]):
                 continue
             try:
                 if msg.get("type") == "dets" and not u.has("plate_search"):
@@ -148,11 +151,14 @@ def broadcast(kind: str, payload: dict) -> None:
         notify(kind, payload)
     except Exception:  # noqa: BLE001
         log.exception("notify failed")
+    if kind != "anpr.event":
+        inbox.from_event(kind, payload)
 
 
 @app.on_event("startup")
 async def _startup() -> None:
     hub.loop = asyncio.get_running_loop()
+    inbox.set_sink(hub.send_threadsafe)
     threading.Thread(target=_refresh_live_paths, daemon=True).start()
     if settings.bus == "kafka":
         from ..bus import TOPIC_ALERTS, TOPIC_ANPR, TOPIC_DETS, TOPIC_INCIDENTS, consume
@@ -226,6 +232,12 @@ def _me(u: A.User) -> dict:
             "is_super": bool(u.is_super), "tenant": u.tenant, "branding": branding(u.tenant) if u.tenant else {}}
 
 
+@app.get("/api/auth/me")
+def auth_me(u: A.User = Depends(current_user)):
+    """The signed-in user's current effective access (follows role edits without a new sign-in)."""
+    return _me(u) | {"roles_version": rbac.roles_version()}
+
+
 @app.get("/api/auth/providers")
 def auth_providers():
     prov = A.auth_cfg().get("providers") or {}
@@ -252,6 +264,9 @@ def login(body: Login, request: Request):
         A.note_login(s, name, bool(u), u.provider if u else None)
         if not u:
             audit(s, name, "login_failed", ip=_ip(request))
+            if A.is_locked(s, name):
+                inbox.push("security", f"Account {name} locked after repeated failed sign-ins", f"from {_ip(request)}", severity="warn",
+                           ref_id=name, link="admin", feature="admin", session=s)
             s.commit()
             raise HTTPException(401, "invalid username or password")
         enrolled = A.mfa_enrolled(s, u.username)
@@ -725,12 +740,93 @@ def put_layout(name: str, body: dict, u: A.User = Depends(need("live"))):
     return {"ok": True}
 
 
+AUDIT_SORT = {"ts": AuditLog.ts, "id": AuditLog.id, "user": AuditLog.user_id, "action": AuditLog.action, "target": AuditLog.target, "ip": AuditLog.ip}
+
+
+def _audit_row(r: AuditLog) -> dict:
+    return {"id": r.id, "ts": r.ts.isoformat(), "user": r.user_id, "action": r.action, "target": r.target,
+            "detail": r.detail, "ip": r.ip, "hash": (r.hash or "")[:12]}
+
+
+def _audit_query(q: str = "", user: str = "", action: str = "", target: str = "", ip: str = "",
+                 from_ts: str | None = None, to_ts: str | None = None, sort: str = "ts", order: str = "desc"):
+    stmt = select(AuditLog)
+    if user:
+        stmt = stmt.where(AuditLog.user_id == user)
+    if action:
+        acts = [a.strip() for a in action.split(",") if a.strip()]
+        stmt = stmt.where(AuditLog.action.in_(acts)) if len(acts) > 1 else stmt.where(AuditLog.action == acts[0]) if acts else stmt
+    if target:
+        stmt = stmt.where(AuditLog.target.ilike(f"%{target}%"))
+    if ip:
+        stmt = stmt.where(AuditLog.ip.ilike(f"{ip}%"))
+    if from_ts:
+        stmt = stmt.where(AuditLog.ts >= _parse_time(from_ts))
+    if to_ts:
+        stmt = stmt.where(AuditLog.ts <= _parse_time(to_ts))
+    if q:
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(AuditLog.user_id.ilike(like) | AuditLog.action.ilike(like) | AuditLog.target.ilike(like)
+                          | AuditLog.detail.ilike(like) | AuditLog.ip.ilike(like))
+    col = AUDIT_SORT.get(sort, AuditLog.ts)
+    stmt = stmt.order_by(col.asc() if order == "asc" else col.desc(), AuditLog.id.asc() if order == "asc" else AuditLog.id.desc())
+    return stmt
+
+
 @app.get("/api/audit")
-def get_audit(limit: int = 200, u: A.User = Depends(need("audit"))):
+def get_audit(limit: int | None = None, page: int | None = None, page_size: int = 50, q: str = "", user: str = "", action: str = "",
+              target: str = "", ip: str = "", from_ts: str | None = Query(default=None, alias="from"),
+              to_ts: str | None = Query(default=None, alias="to"), sort: str = "ts", order: str = "desc",
+              u: A.User = Depends(need("audit"))):
+    """Audit rows. `?limit=N` (legacy) returns a plain list of the newest N rows; `?page=` returns
+    {items, total, page, pages, page_size} with filters (user, action, target, ip, from, to, q) and sorting
+    (sort=ts|user|action|target|ip, order=asc|desc)."""
+    stmt = _audit_query(q, user, action, target, ip, from_ts, to_ts, sort, order)
     with SessionLocal() as s:
-        rows = s.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)).all()
-    return [{"id": r.id, "ts": r.ts.isoformat(), "user": r.user_id, "action": r.action, "target": r.target,
-             "detail": r.detail, "ip": r.ip, "hash": r.hash[:12]} for r in rows]
+        if page is None:
+            rows = s.scalars(stmt.limit(min(int(limit or 200), 5000))).all()
+            return [_audit_row(r) for r in rows]
+        page = max(1, page)
+        page_size = max(1, min(page_size, 500))
+        total = int(s.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0)
+        rows = s.scalars(stmt.offset((page - 1) * page_size).limit(page_size)).all()
+        return {"items": [_audit_row(r) for r in rows], "total": total, "page": page, "page_size": page_size,
+                "pages": max(1, -(-total // page_size)), "sort": sort if sort in AUDIT_SORT else "ts", "order": order}
+
+
+@app.get("/api/audit/facets")
+def audit_facets(u: A.User = Depends(need("audit"))):
+    """Distinct users and actions (with counts) for the filter drop-downs."""
+    with SessionLocal() as s:
+        acts = s.execute(select(AuditLog.action, func.count()).group_by(AuditLog.action).order_by(func.count().desc())).all()
+        users = s.execute(select(AuditLog.user_id, func.count()).group_by(AuditLog.user_id).order_by(func.count().desc())).all()
+        first = s.scalar(select(func.min(AuditLog.ts)))
+        total = s.scalar(select(func.count()).select_from(AuditLog)) or 0
+    return {"actions": [{"action": a, "count": n} for a, n in acts], "users": [{"user": x, "count": n} for x, n in users],
+            "total": int(total), "first_ts": first.isoformat() if first else None}
+
+
+@app.get("/api/audit/export.csv")
+def audit_export(request: Request, q: str = "", user: str = "", action: str = "", target: str = "", ip: str = "",
+                 from_ts: str | None = Query(default=None, alias="from"), to_ts: str | None = Query(default=None, alias="to"),
+                 sort: str = "ts", order: str = "desc", u: A.User = Depends(need("audit"))):
+    """The filtered audit rows as CSV (max 50,000 rows); the export itself is audited."""
+    import csv
+    import io
+    from fastapi.responses import Response
+    stmt = _audit_query(q, user, action, target, ip, from_ts, to_ts, sort, order)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["id", "time_utc", "user", "action", "target", "detail", "ip", "hash", "prev_hash"])
+    with SessionLocal() as s:
+        n = 0
+        for r in s.scalars(stmt.limit(50000)):
+            w.writerow([r.id, r.ts.isoformat(), r.user_id, r.action, r.target, r.detail, r.ip, r.hash, r.prev_hash])
+            n += 1
+        audit(s, u.username, "audit_export", "", f"rows={n} q={q!r} user={user!r} action={action!r} from={from_ts} to={to_ts}", _ip(request))
+        s.commit()
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=audit-{utcnow().date()}.csv"})
 
 
 @app.get("/api/audit/verify")
@@ -1240,6 +1336,28 @@ def ingest(ev: dict):
 
 
 _view_audit: dict[tuple[str, str], float] = {}
+_pub_cache: dict = {"at": 0.0, "keys": {}}
+
+
+def _publish_keys() -> dict[str, str]:
+    """camera id -> publish key for every push source (sources.yaml + console devices), cached 30 s."""
+    if time.time() - _pub_cache["at"] > 30:
+        keys: dict[str, str] = {}
+        try:
+            from ..adapters.registry import build
+            from .adapter_service import all_sources
+            for scfg in all_sources().get("sources", []):
+                if scfg.get("adapter") != "push":
+                    continue
+                ad = build(scfg)
+                k = ad.publish_key()
+                if k:
+                    for c in ad.list_cameras():
+                        keys[f"{scfg.get('id_prefix', '')}{c.native_id}"] = k
+        except Exception:  # noqa: BLE001
+            log.exception("publish keys")
+        _pub_cache.update({"at": time.time(), "keys": keys})
+    return _pub_cache["keys"]
 
 
 @app.post("/internal/relay-auth")
@@ -1251,6 +1369,16 @@ def relay_auth(b: dict):
     action, path, proto = b.get("action"), b.get("path", ""), b.get("protocol", "")
     if b.get("user") == settings.relay_internal_user and b.get("password") == settings.relay_internal_pass:
         return JSONResponse({"ok": True})
+    if action == "publish":
+        # a site connector pushing a camera's stream: user "site", password = the push source's publish key
+        cam_id = path.split("/")[0]
+        key = _publish_keys().get(cam_id)
+        if key is None and time.time() - _pub_cache["at"] > 5:      # a device connected seconds ago: refresh now
+            _pub_cache["at"] = 0
+            key = _publish_keys().get(cam_id)
+        if key and b.get("password") == key and path.endswith("/main"):
+            return JSONResponse({"ok": True})
+        return JSONResponse({"error": "publish denied"}, status_code=401)
     if action not in ("read", "playback") or proto not in ("webrtc", "hls"):
         return JSONResponse({"error": "denied"}, status_code=401)
     qs = dict(x.split("=", 1) for x in (b.get("query") or "").split("&") if "=" in x)
@@ -1290,6 +1418,7 @@ from .routes_persons import router as persons_router  # noqa: E402
 from .routes_analysis import router as analysis_router  # noqa: E402
 from .routes_registry import router as registry_router  # noqa: E402
 from .routes_devices import router as devices_router  # noqa: E402
+from .routes_ops2 import router as ops2_router  # noqa: E402
 app.include_router(investigation_router)
 app.include_router(analytics_router)
 app.include_router(ops_router)
@@ -1298,25 +1427,19 @@ app.include_router(persons_router)
 app.include_router(analysis_router)
 app.include_router(registry_router)
 app.include_router(devices_router)
+app.include_router(ops2_router)
 
 
 # ----------------------------------------------------------------------------- web UI
-# The React console (platform/webapp) builds into WEB_DIR: `npm run build`, or the Dockerfile's console stage.
-# Without a build, the static files (field app /m/, /i18n, /brand) are still served from webapp/public.
 WEB = Path(settings.web_dir)
-WEB_PUBLIC = Path(settings.web_dir).parent / "webapp" / "public"
-if (WEB / "index.html").exists():
+if WEB.exists():
     @app.get("/", include_in_schema=False)
     def _index():
-        """Console entry. Built assets carry content hashes, so only index.html must never come from a stale cache."""
+        """Console entry: assets carry the build version so a new build is never served from a stale browser cache."""
         from fastapi import Response
-        return Response((WEB / "index.html").read_text(encoding="utf-8"), media_type="text/html", headers={"Cache-Control": "no-store"})
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        v = settings.version
+        html = html.replace('href="styles.css"', f'href="styles.css?v={v}"').replace('src="app.js"', f'src="app.js?v={v}"')
+        return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
 
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")
-elif WEB_PUBLIC.exists():
-    @app.get("/", include_in_schema=False)
-    def _index_unbuilt():
-        from fastapi import Response
-        return Response("Operator console not built: run `npm install && npm run build` in platform/webapp.", media_type="text/plain", status_code=503)
-
-    app.mount("/", StaticFiles(directory=WEB_PUBLIC, html=True), name="web")

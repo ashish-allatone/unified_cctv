@@ -434,6 +434,28 @@ class PlateReview(Base):
     ts: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
 
 
+class Setting(Base):
+    """Small key -> JSON settings changed from the console at run time (e.g. the detection switch)."""
+    __tablename__ = "settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+
+
+def get_setting(session, key: str, default: dict | None = None) -> dict:
+    row = session.get(Setting, key)
+    return dict(row.value or {}) if row is not None else dict(default or {})
+
+
+def set_setting(session, key: str, value: dict, user: str = "") -> None:
+    row = session.get(Setting, key)
+    if row is None:
+        session.add(Setting(key=key, value=value, updated_by=user))
+    else:
+        row.value, row.updated_at, row.updated_by = value, utcnow(), user
+
+
 class AuditLog(Base):
     """Append-only, hash-chained: each row's hash covers its content and the previous row's hash,
     so any edit or deletion is detectable (/api/audit/verify)."""
@@ -509,6 +531,71 @@ class AccessGrant(Base):
     expires_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     revoked_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     revoked_by: Mapped[str] = mapped_column(String(64), default="")
+
+
+class Role(Base):
+    """Console roles with their permissions. The four built-in roles are seeded from uvp.rbac and can be
+    adjusted; custom roles are added from Admin -> Roles. Effective permissions of a signed-in user follow
+    the role's current feature list (see uvp.rbac.role_features), not the list at sign-in."""
+    __tablename__ = "roles"
+    name: Mapped[str] = mapped_column(String(32), primary_key=True)
+    description: Mapped[str] = mapped_column(String(200), default="")
+    features: Mapped[list] = mapped_column(JSON, default=list)
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class Inbox(Base):
+    """In-console notifications (the bell): alerts, incidents, camera health, device / detection / archival
+    events. One row per event, visible to users of the department ('*' = everyone); per-user read state in
+    inbox_reads."""
+    __tablename__ = "inbox"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    ts: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+    kind: Mapped[str] = mapped_column(String(32), index=True)          # alert | incident | camera | device | detection | archival | report | security | system
+    severity: Mapped[str] = mapped_column(String(12), default="info")   # info | warn | critical
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text, default="")
+    department: Mapped[str] = mapped_column(String(64), default="*", index=True)
+    ref_id: Mapped[str] = mapped_column(String(64), default="")
+    link: Mapped[str] = mapped_column(String(64), default="")           # console view to open (alerts, sources, ...)
+    feature: Mapped[str] = mapped_column(String(32), default="")        # "" = everyone; else only users with that feature
+
+
+class InboxRead(Base):
+    __tablename__ = "inbox_reads"
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    inbox_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    ts: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class ArchivalPolicy(Base):
+    """Retention / archival rule per data class (and optionally per department): keep N days, then delete
+    or archive (copy to the cold prefix in object storage, then delete). Legal holds always win."""
+    __tablename__ = "archival_policies"
+    data_class: Mapped[str] = mapped_column(String(32), primary_key=True)
+    department: Mapped[str] = mapped_column(String(64), primary_key=True, default="*")
+    keep_days: Mapped[int] = mapped_column(Integer, default=90)
+    action: Mapped[str] = mapped_column(String(16), default="delete")   # delete | archive
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class ArchivalRun(Base):
+    __tablename__ = "archival_runs"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    started_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+    finished_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    trigger: Mapped[str] = mapped_column(String(16), default="schedule")   # schedule | manual
+    by: Mapped[str] = mapped_column(String(64), default="archiver")
+    status: Mapped[str] = mapped_column(String(16), default="running")     # running | ok | error
+    removed: Mapped[dict] = mapped_column(JSON, default=dict)              # {"events": 120, "clips": 40, ...}
+    archived: Mapped[dict] = mapped_column(JSON, default=dict)
+    held: Mapped[int] = mapped_column(Integer, default=0)                  # rows skipped because of a legal hold
+    detail: Mapped[str] = mapped_column(Text, default="")
 
 
 class LegalHold(Base):
@@ -604,6 +691,18 @@ def _migrate() -> None:
                          ("created_at", "TIMESTAMP"), ("created_by", "VARCHAR(64) DEFAULT ''"), ("updated_by", "VARCHAR(64) DEFAULT ''")):
             if col not in have_cam:
                 con.execute(text(f"ALTER TABLE cameras ADD COLUMN {col} {ddl}"))
+    _seed_roles()
+
+
+def _seed_roles() -> None:
+    from . import rbac
+    try:
+        with SessionLocal() as s:
+            rbac.seed_roles(s)
+            s.commit()
+        rbac.invalidate()
+    except Exception:  # noqa: BLE001  (concurrent first start of several services: another one seeded first)
+        pass
 
 
 _audit_lock = threading.Lock()

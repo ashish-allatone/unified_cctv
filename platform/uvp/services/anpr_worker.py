@@ -29,6 +29,7 @@ import cv2
 import numpy as np
 
 from ..bus import TOPIC_ANPR, TOPIC_DETS, publisher
+from .. import detection as DETECT
 from ..config import settings
 from .. import metrics as M
 from ..analytics.attributes import vehicle_attributes
@@ -774,6 +775,9 @@ def run_live() -> None:
                 log.info("stats %s", dict(stats))
         submitted = False
         for cid, cap in list(caps.items()):
+            if not DETECT.allows(cid):            # detection switch off for this camera: no inference, frames are dropped
+                last_proc[cid] = cap.frame_ts
+                continue
             if cap.frame is None or cap.frame_ts <= last_proc.get(cid, 0) or pool.busy(cid):
                 continue
             frame, fts = cap.frame, cap.frame_ts

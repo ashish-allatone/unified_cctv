@@ -22,6 +22,7 @@ from .. import metrics as M
 from ..analytics.detector import detector
 from ..analytics.zones import ZoneAnalyzer
 from ..bus import TOPIC_DETS, TOPIC_INCIDENTS, publisher
+from .. import detection as DETECT
 from ..config import load_yaml, settings
 from ..db import Camera, SessionLocal, init_db, new_id
 from ..relay import internal_rtsp_url
@@ -363,6 +364,9 @@ def run_live() -> None:
                 log.info("stats %s", dict(stats))
         submitted = False
         for cid, cap in list(caps.items()):
+            if not DETECT.allows(cid):            # detection switch off for this camera: no inference, frames are dropped
+                last[cid] = cap.frame_ts
+                continue
             if cap.frame is None or cap.frame_ts <= last.get(cid, 0) or pool.busy(cid):
                 continue
             frame, fts = cap.frame, cap.frame_ts

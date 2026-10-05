@@ -22,6 +22,7 @@ import numpy as np
 from .. import metrics as M
 from ..analytics.faces import Gallery, engine
 from ..bus import TOPIC_DETS, TOPIC_INCIDENTS, publisher
+from .. import detection as DETECT
 from ..config import load_yaml, settings
 from ..db import Camera, Person, SessionLocal, init_db, utcnow
 from .analytics_worker import Capture, make_event
@@ -126,6 +127,9 @@ def run_live() -> None:
                 log.info("stats %s · gallery %d embeddings", dict(stats), len(gallery))
         submitted = False
         for cid, cap in list(caps.items()):
+            if not DETECT.allows(cid):            # detection switch off for this camera: no inference, frames are dropped
+                last[cid] = cap.frame_ts
+                continue
             if cap.frame is None or cap.frame_ts <= last.get(cid, 0) or pool.busy(cid):
                 continue
             if pool.submit(cid, step, cap.frame, cap.frame_ts):

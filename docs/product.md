@@ -28,9 +28,9 @@ customer, tenant, **camera limit**, **ANPR channels**, **analytics channels**, f
 
 ## Languages and accessibility
 
-- Console and field app strings in `platform/webapp/public/i18n/en.json` and `hi.json`; the header button switches
+- Console and field app strings in `platform/web/i18n/en.json` and `hi.json`; the header button switches
   English ↔ हिंदी (remembered per browser; `DEFAULT_LANGUAGE`). Add a language by adding a JSON file and a
-  toggle entry; add strings with `t("key", "English fallback")` (from `useI18n()`).
+  toggle entry; add strings with `data-i18n="key"` / `t("key")`.
 - Accessibility: skip-to-content link, ARIA landmarks and labels on icon buttons, live region for toasts,
   visible focus rings, reduced-motion support, keyboard shortcuts **Alt+1…9** for the tabs, dark
   control-room theme with ≥ 4.5:1 text contrast.
@@ -51,11 +51,7 @@ customer, tenant, **camera limit**, **ANPR channels**, **analytics channels**, f
 
 ## Console (v1.2): layout and themes
 
-React 19 + Vite in `platform/webapp/` (`src/views/` one component per section, `src/lib/player.js` the WebRTC/HLS
-tile player, `src/styles.css` the theme tokens, `public/` the field app `/m/`, i18n and brand files).
-`npm run build` writes the bundle to `platform/web/` (git-ignored), which the API serves at `/`; the Dockerfile
-builds it in a Node stage. For development run the API, then `npm run dev` in `platform/webapp` (port 5173,
-proxies `/api` and `/ws` to `UVP_API`, default `http://localhost:8000`).
+`platform/web/index.html`, `styles.css`, `app.js` — plain HTML/CSS/JS, no build step; served by the API at `/`.
 
 * **Shell**: left sidebar (Operations / Investigate / System groups, collapsible to an icon rail, becomes a bottom
   bar on phones), top bar (page title, live-channel dot, user chip, Break glass, 2FA, language, theme, Sign out).
@@ -66,14 +62,13 @@ proxies `/api` and `/ws` to `UVP_API`, default `http://localhost:8000`).
   colour is a token in `styles.css`; the toggle (sun/moon) is on the login page and the top bar; the choice is saved
   in `localStorage` (`uvp-theme`) and applied before first paint. The video wall stays black in both.
 * **Ids and classes are unchanged** from 1.1 (every view keeps its `#view-*`, tables, forms, `#tabs button[data-view]`),
-  so the e2e tests and any bookmarks/automation keep working. Only the active section is mounted (plus the video
-  wall, which stays mounted so live tiles keep playing).
+  so the e2e tests and any bookmarks/automation keep working.
 
 ## Languages: English, Hindi, Gujarati
 
-The header language button cycles English → हिंदी → ગુજરાતી (`platform/webapp/public/i18n/en|hi|gu.json`, same keys;
-the choice is remembered per browser and the browser's own language picks the default). Add a language by copying
-`en.json` and adding its code to `LANGS` in `src/lib/i18n.jsx`.
+The header language button cycles English → हिंदी → ગુજરાતી (`platform/web/i18n/en|hi|gu.json`, same keys; the
+choice is remembered per browser and the browser's own language picks the default). Add a language by copying
+`en.json` and adding its code to `LANGS` in `app.js`.
 
 ## Spoken alerts (text-to-speech)
 

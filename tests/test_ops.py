@@ -299,3 +299,159 @@ def test_pwa_is_served(client):
     m = client.get("/m/manifest.json").json()
     assert m["display"] == "standalone" and m["start_url"] == "/m/"
     assert "serviceWorker" in client.get("/m/app.js").text and client.get("/m/sw.js").status_code == 200
+
+
+# ----------------------------------------------------------------------------- voice call channel (BulkOBD dialer)
+def test_voice_call_channel_and_ack_callback(client, monkeypatch, tmp_path):
+    import uvp.notify as N
+    from uvp.config import settings
+    from uvp.db import Alert, Notification, SessionLocal, utcnow
+    h = tok(client)
+    cfg = tmp_path / "notify.yaml"
+    cfg.write_text("""
+channels:
+  voice: {type: voice, url: http://obd.test/OBDSEA, username: acc, password: pw, ack_digit: "1", max_call_s: 40, tts: dialer}
+routes:
+  - {kind: alert, priority: high, channel: voice, to: ["9876543210"]}
+""")
+    monkeypatch.setattr(settings, "notify_file", cfg)
+    monkeypatch.setattr(settings, "voice_callback_key", "k123")
+    calls = []
+
+    class R:
+        ok, status_code, text = True, 200, '{"status":"queued","campid":"5551"}'
+    monkeypatch.setattr(N.requests, "post", lambda url, json=None, data=None, files=None, headers=None, timeout=0: (calls.append({"url": url, "json": json or {k: (int(v[1]) if v[1].lstrip("-").isdigit() else v[1]) for k, v in (files or {}).items()}}) or R()))
+    with SessionLocal() as s:
+        s.add(Alert(id="al" + "0" * 30, event_id="e", plate="GJ01AB1234", watchlist_plate="GJ01AB1234", camera_id="police-cam1", department="Police",
+                    ts=utcnow(), priority="high", reason="stolen vehicle"))
+        s.commit()
+    N.deliver_now("alert", {"id": "al" + "0" * 30, "plate": "GJ01AB1234", "department": "Police", "priority": "high", "match": "exact",
+                            "watchlist_plate": "GJ01AB1234", "reason": "stolen vehicle", "camera_id": "police-cam1", "ts": "2026-09-22T10:00:00+00:00"})
+    assert calls and calls[0]["url"] == "http://obd.test/OBDSEA/voiceBlast"
+    body = calls[0]["json"]
+    assert body["numbers"].startswith("919876543210,arg1:") and body["camp_type"] == 4 and body["soundId"] == 0 and str(body["valid_option"]) == "1"
+    assert body["tts_text"] == "{var1}" and body["var1"] == body["numbers"].split("arg1:", 1)[1]
+    spoken = body["var1"]
+    assert "G J 0 1 A B 1 2 3 4" in spoken and "Press 1 to acknowledge" in spoken and "15 30" in spoken
+    assert not any(c in spoken for c in "<>,:;{}")
+    assert body["campname"].startswith("uvp-") and body["maxcallTimeSec"] == 40 and body["username"] == "acc"
+    with SessionLocal() as s:
+        n = s.scalar(N.select(Notification).where(Notification.channel == "voice").order_by(Notification.ts.desc()).limit(1))
+        assert n.status == "sent" and "call queued to 919876543210" in n.detail
+        nid = n.id
+    # the dialer reports the result: answered, pressed 1 -> alert acknowledged by phone
+    assert client.post("/api/integrations/voice/callback?key=wrong", json={"campid": f"uvp-{nid}"}).status_code == 403
+    r = client.post("/api/integrations/voice/callback?key=k123", json={"campid": f"uvp-{nid}", "number": "919876543210", "response": "1",
+                                                                       "duration": "22", "dialstatus": "ANSWERED", "callanswertime": "2026-09-22 15:30:05"})
+    assert r.status_code == 200 and r.json() == {"matched": True, "acknowledged": True}
+    with SessionLocal() as s:
+        assert s.get(Notification, nid).status == "answered"
+        a = s.get(Alert, "al" + "0" * 30)
+        assert a.ack_at is not None and a.ack_by == "voice:919876543210"
+    # form-encoded callback, matched by number when campid is the provider's own id
+    r = client.post("/api/integrations/voice/callback?key=k123", data={"campid": "5551", "number": "9876543210", "dialstatus": "NO ANSWER", "response": ""})
+    assert r.json()["matched"] is True
+    with SessionLocal() as s:
+        assert s.get(Notification, nid).status == "no_answer"
+    # admin test call
+    t = client.post("/api/admin/notifications/test?channel=voice&to=9876543210", headers=h).json()
+    assert t["status"] == "sent" and "test call" in calls[-1]["json"]["var1"].lower()
+    # HTTP 200 but refused by the dialer (outside its calling window) must show as failed, with the reason
+    class Refused:
+        ok, status_code, text = True, 200, '{"response":"Campaign Can schedule between 9 AM to 7 PM","error_code":400,"status":"failed"}'
+        def json(self): return {"response": "Campaign Can schedule between 9 AM to 7 PM", "error_code": 400, "status": "failed"}
+    monkeypatch.setattr(N.requests, "post", lambda url, json=None, data=None, files=None, headers=None, timeout=0: Refused())
+    monkeypatch.setattr(N.time, "sleep", lambda s: None)
+    t = client.post("/api/admin/notifications/test?channel=voice&to=9876543210", headers=h).json()
+    assert t["status"] == "failed" and "between 9 AM to 7 PM" in t["detail"] and "24x7" in t["detail"]
+
+
+def test_notification_routes_and_channel_toggle_from_console(client, monkeypatch, tmp_path):
+    import uvp.notify as N
+    from uvp.config import settings
+    from uvp.db import Setting, SessionLocal
+    h = tok(client)
+    cfg = tmp_path / "notify.yaml"
+    cfg.write_text("""
+channels:
+  sms:   {type: sms, enabled: false, url: http://sms.test/send, body: {to: "{to}", message: "{text}"}}
+  voice: {type: voice, url: http://obd.test/OBDSEA, username: acc, password: pw, tts: dialer}
+routes:
+  - {kind: alert, priority: high, channel: sms, to: ["+911"]}
+""")
+    monkeypatch.setattr(settings, "notify_file", cfg)
+    with SessionLocal() as s:                                   # start from the yaml
+        for k in ("notify_routes", "notify_channels"):
+            row = s.get(Setting, k)
+            if row: s.delete(row)
+        s.commit()
+    st = client.get("/api/admin/notifications", headers=h).json()
+    assert st["routes_source"] == "yaml" and st["routes"][0]["to"] == ["+911"] and st["routes"][0]["id"] == "y1"
+    assert {c["name"]: c["enabled"] for c in st["channels"]} == {"sms": False, "voice": True}
+    # change the number + add a voice route from the console
+    r = client.put("/api/admin/notifications/routes", json={"routes": [
+        {"kind": "alert", "priority": "high", "channel": "sms", "to": "98765 43210, +91 9876543211"},
+        {"kind": "alert", "priority": "high", "subkind": "exact", "channel": "voice", "to": ["9123456789"]},
+        {"kind": "camera.health", "channel": "voice", "to": ["9123456789"], "enabled": False}]}, headers=h)
+    assert r.status_code == 200 and r.json()["routes"][0]["to"] == ["9876543210", "+919876543211"]
+    assert client.put("/api/admin/notifications/routes", json={"routes": [{"kind": "alert", "channel": "voice", "to": ["12"]}]}, headers=h).status_code == 400
+    assert client.put("/api/admin/notifications/routes", json={"routes": [{"kind": "alert", "channel": "nope", "to": ["9123456789"]}]}, headers=h).status_code == 400
+    # channel switch from the console
+    assert client.patch("/api/admin/notifications/channels/sms", json={"enabled": True}, headers=h).json()["enabled"] is True
+    assert client.patch("/api/admin/notifications/channels/zzz", json={"enabled": True}, headers=h).status_code == 404
+    c = N.cfg()
+    assert c["channels"]["sms"]["enabled"] is True and c["routes_source"] == "console"
+    assert [r["channel"] for r in c["routes"]] == ["sms", "voice"]           # the disabled route is left out
+    assert c["routes"][0]["to"] == ["9876543210", "+919876543211"]
+    calls = []
+
+    class R:
+        ok, status_code, text = True, 200, "ok"
+    monkeypatch.setattr(N.requests, "request", lambda method, url, json=None, headers=None, timeout=0: (calls.append(("sms", json["to"])) or R()))
+    monkeypatch.setattr(N.requests, "post", lambda url, json=None, data=None, files=None, headers=None, timeout=0: (calls.append(("voice", ((files or {}).get("numbers") or (None, ""))[1].split(",")[0])) or R()))
+    N.deliver_now("alert", {"id": "a1", "plate": "GJ01AB0001", "department": "Police", "priority": "high", "match": "exact", "camera_id": "police-cam1", "ts": "2026-10-05T10:00:00+00:00"})
+    assert ("sms", "9876543210") in calls and ("sms", "+919876543211") in calls and ("voice", "919123456789") in calls
+    # back to yaml
+    assert client.delete("/api/admin/notifications/routes", headers=h).json()["ok"]
+    assert client.get("/api/admin/notifications", headers=h).json()["routes_source"] == "yaml"
+    acts = [a["action"] for a in client.get("/api/audit?limit=10", headers=h).json()]
+    assert "notify_routes" in acts and "notify_channel" in acts
+
+
+def test_voice_local_tts_clip_is_uploaded_and_played(client, monkeypatch, tmp_path):
+    """When the dialer's own TTS is silent: speak locally (espeak-ng), upload the MP3, play it by soundId."""
+    import uvp.notify as N
+    from uvp.config import settings
+    h = tok(client)
+    cfg = tmp_path / "notify.yaml"
+    cfg.write_text("""
+channels:
+  voice: {type: voice, url: http://obd.test/OBDSEA, username: acc, password: pw, ack_digit: "1"}
+routes: []
+""")
+    monkeypatch.setattr(settings, "notify_file", cfg)
+    monkeypatch.setattr(N, "_tts_mp3", lambda text, ch: b"ID3fake-mp3" if "test call" in text.lower() and "press 1" in text.lower() else None)
+    posts = []
+
+    class Up:
+        ok, status_code, text = True, 200, '{"sounid":4471,"response":"Sound successfully upload","status":"success"}'
+
+    class Blast:
+        ok, status_code, text = True, 200, '{"CampaignId":586301,"response":"Your Campaign has schedule","status":"success"}'
+
+    def fake_post(url, json=None, data=None, files=None, headers=None, timeout=0):
+        posts.append({"url": url, "data": data, "files": files})
+        return Up() if url.endswith("/uploadSound") else Blast()
+    monkeypatch.setattr(N.requests, "post", fake_post)
+    t = client.post("/api/admin/notifications/test?channel=voice&to=9876543210", headers=h).json()
+    assert t["status"] == "sent" and "sound 4471" in t["detail"] and "campaign 586301" in t["detail"]
+    up = posts[0]
+    assert up["url"] == "http://obd.test/OBDSEA/uploadSound" and up["data"]["username"] == "acc" and up["files"]["file"][1] == b"ID3fake-mp3"
+    blast = {k: v[1] for k, v in posts[1]["files"].items()}
+    assert blast["soundId"] == "4471" and blast["camp_type"] == "2" and blast["tts_text"] == "NA" and blast["numbers"] == "919876543210" and blast["valid_option"] == "1"
+    # real espeak-ng output is a playable MP3 when the tool is present
+    import shutil
+    if shutil.which("espeak-ng") and shutil.which("ffmpeg"):
+        monkeypatch.undo()
+        mp3 = N._tts_mp3("Unified CCTV alert. Watch list vehicle G J 0 1 A B 1 2 3 4 seen at Toll.", {})
+        assert mp3 and len(mp3) > 2000

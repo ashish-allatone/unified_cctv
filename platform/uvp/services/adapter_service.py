@@ -299,12 +299,14 @@ def sync_once() -> dict:
                         pn = path_name(cid, prof)
                         want_rec = rec and prof == "main"       # archive the main profile only
                         src_url = sp.url
-                        if prof != "main" and main_url and sp.url == main_url:
+                        if sp.url == "publisher" and prof != "main":
+                            src_url = loopback_url(target, cid, "main")       # the site pushes one stream; sub re-reads it
+                        elif prof != "main" and main_url and sp.url == main_url:
                             # single-stream camera (Corp8 gives one URL): the sub path re-reads the relay's own
                             # main path instead of opening a second session on the departmental gateway -
                             # halves the gateway's concurrent-session count (30 cameras -> 30 sessions, not 60)
                             src_url = loopback_url(target, cid, "main")
-                        want_persist = persist and prof == "main"
+                        want_persist = (persist and prof == "main") or src_url == "publisher"   # a pushed stream is always "on"
                         if configured.get(pn) != (src_url, want_rec, want_rec or want_persist):  # only touch the relay when something changed
                             result = target.upsert_path(pn, src_url, record=want_rec, persistent=want_persist)
                             log.info("relay %s path %s -> %s record=%s persistent=%s (%s)", target.name, pn, redact(src_url), want_rec, want_persist, result)

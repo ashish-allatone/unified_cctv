@@ -11,7 +11,7 @@ x-platform: &platform
   image: uvp/platform:0.1
   env_file: .env
   environment: &platform-env
-    DATABASE_URL: postgresql+psycopg://uvp:${POSTGRES_PASSWORD}@postgres:5432/uvp
+    DATABASE_URL: postgresql+psycopg://uvp:${POSTGRES_PASSWORD}@${PG_HOST:-postgres}:${PG_PORT:-5432}/uvp   # PG_HOST=pg-haproxy PG_PORT=5000 for the 3-node cluster (deploy/postgres-ha)
     BUS: kafka
     KAFKA_BOOTSTRAP: kafka:9092
     ES_URL: http://elasticsearch:9200
@@ -89,6 +89,7 @@ services:
       - "8189:8189/udp"    # WebRTC media (UDP preferred)
       - "8189:8189/tcp"    # WebRTC media over TCP when UDP is blocked (cloud security lists, corporate firewalls)
       - "8888:8888"        # HLS fallback
+      - "8554:8554"        # RTSP: site connectors push remote recorders' streams here (outbound from the site, key-authenticated)
     restart: unless-stopped
 
   # ---------------------------------------------------------------- platform services

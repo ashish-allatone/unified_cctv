@@ -48,7 +48,7 @@ class Relay:
 
     def upsert_path(self, name: str, source_url: str, record: bool = False, persistent: bool = False) -> str:
         # a recorded or persistent path is pulled all the time; the rest only while someone reads it
-        conf = {"source": source_url, "sourceOnDemand": not (record or persistent), "sourceOnDemandStartTimeout": "10s",
+        conf = {"source": source_url, "sourceOnDemand": source_url != "publisher" and not (record or persistent), "sourceOnDemandStartTimeout": "10s",
                 "sourceOnDemandCloseAfter": "10s", "rtspTransport": "tcp", "record": record,
                 "recordFormat": "fmp4", "recordSegmentDuration": f"{settings.record_segment_s}s",
                 "recordDeleteAfter": settings.record_local_keep}

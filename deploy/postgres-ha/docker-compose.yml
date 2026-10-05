@@ -1,0 +1,95 @@
+# Unified CCTV - PostgreSQL high-availability cluster: 3 PostgreSQL nodes managed by Patroni (automatic leader
+# election + failover), a 3-node etcd for consensus, and HAProxy giving the platform ONE address:
+#   pg-haproxy:5000  -> the current primary (writes)          pg-haproxy:5001 -> replicas (reads)
+#   pg-haproxy:7000  -> HAProxy stats page
+# Runs beside the platform on the same Docker network. On one VM it demonstrates failover (kill the leader, a
+# replica is promoted in ~10 s); on three VMs put one node of each kind per VM (see README.md).
+#
+#   cd deploy/postgres-ha && docker compose up -d && docker compose exec pg1 patronictl -c /home/postgres/postgres.yml list
+name: uvp-pgha
+
+x-pg: &pg
+  image: ghcr.io/zalando/spilo-16:3.3-p1
+  environment: &pgenv
+    SCOPE: uvp
+    PGVERSION: "16"
+    ETCD3_HOSTS: "etcd1:2379,etcd2:2379,etcd3:2379"
+    PGPASSWORD_SUPERUSER: ${PGHA_SUPERUSER_PASSWORD:?set PGHA_SUPERUSER_PASSWORD in deploy/postgres-ha/.env}
+    PGPASSWORD_ADMIN: ${PGHA_ADMIN_PASSWORD:?set PGHA_ADMIN_PASSWORD}
+    PGPASSWORD_STANDBY: ${PGHA_REPLICATION_PASSWORD:?set PGHA_REPLICATION_PASSWORD}
+    PGROOT: /home/postgres/pgdata/pgroot
+    SPILO_PROVIDER: local
+    # synchronous replication: a commit is acknowledged only once one replica has it (no data loss on failover)
+    SPILO_CONFIGURATION: |
+      bootstrap:
+        dcs:
+          synchronous_mode: true
+          synchronous_mode_strict: false
+          postgresql:
+            parameters:
+              max_connections: 300
+              shared_buffers: 1GB
+              wal_level: replica
+              max_wal_senders: 10
+              wal_keep_size: 1GB
+  networks: [uvp]
+  restart: unless-stopped
+
+x-etcd: &etcd
+  image: quay.io/coreos/etcd:v3.5.17
+  networks: [uvp]
+  restart: unless-stopped
+
+services:
+  etcd1:
+    <<: *etcd
+    command: etcd --name etcd1 --initial-advertise-peer-urls http://etcd1:2380 --listen-peer-urls http://0.0.0.0:2380
+      --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://etcd1:2379 --initial-cluster-token uvp-etcd
+      --initial-cluster etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380 --initial-cluster-state new
+    volumes: [etcd1:/etcd-data]
+    environment: { ETCD_DATA_DIR: /etcd-data }
+  etcd2:
+    <<: *etcd
+    command: etcd --name etcd2 --initial-advertise-peer-urls http://etcd2:2380 --listen-peer-urls http://0.0.0.0:2380
+      --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://etcd2:2379 --initial-cluster-token uvp-etcd
+      --initial-cluster etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380 --initial-cluster-state new
+    volumes: [etcd2:/etcd-data]
+    environment: { ETCD_DATA_DIR: /etcd-data }
+  etcd3:
+    <<: *etcd
+    command: etcd --name etcd3 --initial-advertise-peer-urls http://etcd3:2380 --listen-peer-urls http://0.0.0.0:2380
+      --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://etcd3:2379 --initial-cluster-token uvp-etcd
+      --initial-cluster etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380 --initial-cluster-state new
+    volumes: [etcd3:/etcd-data]
+    environment: { ETCD_DATA_DIR: /etcd-data }
+
+  pg1:
+    <<: *pg
+    hostname: pg1
+    volumes: [pg1:/home/postgres/pgdata]
+    depends_on: [etcd1, etcd2, etcd3]
+  pg2:
+    <<: *pg
+    hostname: pg2
+    volumes: [pg2:/home/postgres/pgdata]
+    depends_on: [etcd1, etcd2, etcd3]
+  pg3:
+    <<: *pg
+    hostname: pg3
+    volumes: [pg3:/home/postgres/pgdata]
+    depends_on: [etcd1, etcd2, etcd3]
+
+  pg-haproxy:
+    image: haproxy:2.9-alpine
+    volumes: ["./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"]
+    ports: ["127.0.0.1:5000:5000", "127.0.0.1:5001:5001", "127.0.0.1:7000:7000"]
+    networks: [uvp]
+    depends_on: [pg1, pg2, pg3]
+    restart: unless-stopped
+
+volumes: { etcd1: {}, etcd2: {}, etcd3: {}, pg1: {}, pg2: {}, pg3: {} }
+
+networks:
+  uvp:
+    name: unified-cctv_default       # the platform's compose network, so api/workers reach pg-haproxy by name
+    external: true

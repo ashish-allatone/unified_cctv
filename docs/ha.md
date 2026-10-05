@@ -45,6 +45,9 @@ channels, pulls vs cap, viewers, events/24 h, archive size and growth, estimated
 
 ## Data services (managed / HA)
 
+Self-hosted alternative: `deploy/postgres-ha/` — a 3-node Patroni + etcd + HAProxy PostgreSQL cluster with a
+migration script and a failover demo (README there).
+
 The platform runs against external, replicated services in production; `docker-compose.yml` bundles
 single-node versions for the pilot only.
 

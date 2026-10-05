@@ -1,6 +1,6 @@
 # Unified CCTV Viewing Platform (pilot)
 
-**Unified CCTV by Allatone** — console branding in `platform/webapp/public/brand/` (logo, mark, favicon, PWA icons).
+**Unified CCTV by Allatone** — console branding in `platform/web/brand/` (logo, mark, favicon, PWA icons).
 
 One web console for CCTV feeds from several departmental VMS, with ANPR and searchable
 vehicle-movement records. Departmental systems are not changed: the platform reads from them
@@ -19,16 +19,16 @@ Departmental systems (unchanged)          Unified viewing platform
 
 | Deliverable | Where |
 | --- | --- |
-| Unified viewer on two different systems (ONVIF NVR and vendor REST VMS) | `platform/webapp` (React console), `platform/uvp/adapters`, `simulators/` |
+| Unified viewer on two different systems (ONVIF NVR and vendor REST VMS) | `platform/web`, `platform/uvp/adapters`, `simulators/` |
 | ANPR on live and recorded feeds | `platform/uvp/services/anpr_worker.py` (`--file` for recorded clips) |
 | Searchable metadata dashboard | Search, Vehicle movement, Alerts, Watchlist tabs |
 | Video archive in object storage (clips, crops, recordings, retention) | `platform/uvp/storage.py`, `platform/uvp/services/archiver.py`, Playback tab |
 | Security & compliance (SSO/LDAP, MFA, RBAC grants, break-glass, signed exports, legal hold, DPDP) | `platform/uvp/auth.py`, `rbac.py`, `pii.py`, `signing.py`, Admin tab, `docs/compliance.md` |
 | Investigation (cases, chain of custody, court bundle PDF, timeline stitching, bookmarks, GIS map) | `platform/uvp/investigation.py`, `services/routes_investigation.py`, Cases / Map tabs |
 | Analytics (vehicle attributes, traffic rules, zone analytics, challans, hotlists) | `platform/uvp/analytics/`, `services/analytics_worker.py`, `routes_analytics.py`, `hotlist_sync.py`, Violations tab, `docs/analytics.md` |
-| Operations (tenants, camera SLA + quality, notifications, API keys, webhooks, Vahan, PWA, vendor presets) | `platform/uvp/notify.py`, `tenancy.py`, `services/routes_ops.py`, `platform/webapp/public/m/`, `config/vendors.yaml`, `docs/operations.md` |
+| Operations (tenants, camera SLA + quality, notifications, API keys, webhooks, Vahan, PWA, vendor presets) | `platform/uvp/notify.py`, `tenancy.py`, `services/routes_ops.py`, `platform/web/m/`, `config/vendors.yaml`, `docs/operations.md` |
 | HA & scale (relay cluster + failover, metrics/Grafana, capacity, sharding, GPU, edge outbox, Kubernetes; State-scale sizing in `docs/scale.md`) | `platform/uvp/relay.py`, `metrics.py`, `deploy/monitoring/`, `deploy/k8s/`, `platform/Dockerfile.gpu`, `docs/ha.md` |
-| Product (installer/updater, licensing, Hindi UI, accessibility, ANPR accuracy programme) | `scripts/install.sh`, `platform/uvp/licensing.py`, `reports.py`, `platform/webapp/public/i18n/`, `docs/product.md` |
+| Product (installer/updater, licensing, Hindi UI, accessibility, ANPR accuracy programme) | `scripts/install.sh`, `platform/uvp/licensing.py`, `reports.py`, `platform/web/i18n/`, `docs/product.md` |
 | Centralised CCTV registry & GIS (inventory of every camera incl. non-integrated ones, CSV/manual/API onboarding, map layers, gap analysis, export, audit) | `platform/uvp/services/routes_registry.py`, Registry + Map tabs, `data/samples/registry_sample.csv`, `docs/registry.md` |
 | Evidence that departmental systems are unaffected | `tests/test_non_interference.py` → `docs/reports/non_interference.md` |
 | ANPR accuracy measurement | `scripts/eval_anpr.py` → `docs/reports/anpr_accuracy.md` |
@@ -110,6 +110,13 @@ endpoints, plate masking for roles without `plate_search`, face blurring in evid
 
 Admin → the compliance cards show which of these are switched on in the running deployment.
 
+Console operations (`docs/console.md`): the Audit tab pages, filters, sorts and exports the hash-chained log;
+an in-console **notification centre** (bell + menu badge + dashboard page) collects alerts, incidents, camera
+health, device, detection, security and archival events; a **Reports** tab gives day-wise operations
+figures with CSV export; **roles & permissions** are editable (custom roles, live permission changes); and an
+**archival policy** page sets keep-days and delete / archive-to-cold per data class and department, with
+preview, run-now, schedule and run history (legal holds always win; audit never below 180 days).
+
 ## Analytics beyond ANPR
 
 See `docs/analytics.md`. Vehicle type, colour, plate colour and rider count on every plate read
@@ -151,7 +158,7 @@ field-officer PWA at `/m/`, and vendor presets (`vendor: hikvision|dahua|cpplus|
 - **Map** (`Map` tab, Leaflet bundled offline): cameras with coverage cones from `heading` / `fov` /
   `range_m` in `sources.yaml`; click the map to rank the nearest cameras to an incident and see which ones
   actually cover the point. Street tiles come from OpenStreetMap when internet is available; set your own
-  tile server in `platform/webapp/src/views/MapView.jsx` (`tile.openstreetmap.org`) for air-gapped control rooms.
+  tile server in `app.js` (`tile.openstreetmap.org`) for air-gapped control rooms.
 
 ## Video archive in object storage
 
@@ -166,8 +173,8 @@ What is stored, and where in the bucket:
 How it works: the relay (MediaMTX) writes segments for recorded cameras to a small local buffer
 (`RECORD_LOCAL_KEEP`, default 6 h) and serves a playback API over them. The **archiver** service cuts each
 event clip from that buffer, copies clips, crops and completed segments to object storage, registers them
-in the `recordings` table / event rows, and applies per-department retention from `config/rules.yaml`
-(`retention:`) every hour. Playback links are presigned URLs (S3) valid for `S3_URL_TTL_S`, or served by
+in the `recordings` table / event rows, and applies the archival policies (Admin → Archival; defaults from
+`config/rules.yaml` `retention:`) once a night. Playback links are presigned URLs (S3) valid for `S3_URL_TTL_S`, or served by
 the API for the `local` backend; every clip or recording access is written to the audit log and scoped by
 department like everything else.
 

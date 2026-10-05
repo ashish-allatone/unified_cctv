@@ -116,3 +116,51 @@ def test_connect_device_sync_and_disconnect(client, monkeypatch):
         assert s.query(Camera).filter(Camera.source_id == "sola-nvr").count() == 0 and s.get(Source, "sola-nvr") is None
     acts = [a["action"] for a in client.get("/api/audit?limit=20", headers=h).json()]
     assert "device_connect" in acts and "device_disconnect" in acts
+
+
+def test_push_device_site_connector_and_publish_auth(client, monkeypatch):
+    """A 'remote site' device gets a publish key, its cameras are registered as publisher paths, the relay-auth
+    accepts a publish only with that key, and the site-connector bundle carries the key + camera list."""
+    from uvp.services import adapter_service as A, devices as D, api as API
+    from uvp.db import Camera, SessionLocal, Source
+    h = tok(client)
+    r = client.post("/api/devices", json={"type": "push", "name": "Junagadh DVR", "department": "Police", "vendor": "cpplus", "host": "192.168.1.108", "channels": 2, "anpr": True}, headers=h)
+    assert r.status_code == 201, r.text
+    dev = r.json()
+    assert dev["adapter"] == "push" and dev["username"] == "site" and dev["channels"] == 2
+    srcs = [s for s in A.all_sources()["sources"] if s["id"] == "junagadh-dvr"]
+    key = srcs[0]["publish_key"]
+    assert len(key) > 20 and "password" not in srcs[0]
+    # sync registers publisher paths (main = publisher, sub = loopback of main)
+    ups = {}
+    fake = A.relay.assign("junagadh-dvr-ch1")
+    monkeypatch.setattr(fake, "upsert_path", lambda name, url, record=False, persistent=False: ups.__setitem__(name, (url, persistent)) or "added")
+    monkeypatch.setattr(fake, "delete_path", lambda name: None)
+    monkeypatch.setattr(A.relay, "ping_all", lambda: None)
+    monkeypatch.setattr(A.relay, "live_paths", lambda max_age=0: [])
+    monkeypatch.setattr(A.relay, "configured_by_relay", lambda: {})
+    monkeypatch.setattr(A.settings, "relay_add_stagger_s", 0.0)
+    monkeypatch.setattr(A, "auth_backoff", lambda *a, **k: None)
+    monkeypatch.setattr(A, "db_sources_changed", lambda: False)
+    A.sync_once()
+    assert ups["junagadh-dvr-ch1/main"] == ("publisher", True) and ups["junagadh-dvr-ch1/sub"][0].endswith("/junagadh-dvr-ch1/main")
+    with SessionLocal() as s:
+        assert s.get(Camera, "junagadh-dvr-ch2").anpr_enabled and s.get(Source, "junagadh-dvr").status == "ok"
+    # relay-auth: publish allowed only with the key, only on /main
+    API._pub_cache["at"] = 0
+    ok = client.post("/internal/relay-auth", json={"action": "publish", "path": "junagadh-dvr-ch1/main", "protocol": "rtsp", "user": "site", "password": key})
+    bad = client.post("/internal/relay-auth", json={"action": "publish", "path": "junagadh-dvr-ch1/main", "protocol": "rtsp", "user": "site", "password": "wrong"})
+    sub = client.post("/internal/relay-auth", json={"action": "publish", "path": "junagadh-dvr-ch1/sub", "protocol": "rtsp", "user": "site", "password": key})
+    assert ok.status_code == 200 and bad.status_code == 401 and sub.status_code == 401
+    # bundle
+    z = client.get("/api/devices/junagadh-dvr/site-connector.zip", headers=h)
+    assert z.status_code == 200 and z.headers["content-type"] == "application/zip"
+    import io, zipfile
+    zf = zipfile.ZipFile(io.BytesIO(z.content))
+    names = {n.split("/")[-1] for n in zf.namelist()}
+    assert {"docker-compose.yml", "run.sh", "cameras.txt", ".env", "README.txt"} <= names
+    env = zf.read("site-connector-junagadh-dvr/.env").decode()
+    cams = zf.read("site-connector-junagadh-dvr/cameras.txt").decode()
+    assert f"SITE_KEY={key}" in env and "DVR_HOST=192.168.1.108" in env
+    assert "junagadh-dvr-ch1/main|rtsp://${DVR_HOST}:554/cam/realmonitor?channel=1&subtype=0" in cams and "channel=2" in cams
+    client.delete("/api/devices/junagadh-dvr", headers=h)

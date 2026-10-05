@@ -23,6 +23,7 @@ from sqlalchemy import select
 
 from .. import auth as A
 from ..db import AccessGrant, SessionLocal, Users, audit, utcnow
+from ..inbox import push
 from .deps import _ip, current_user, need
 
 log = logging.getLogger("uvp.users")
@@ -143,6 +144,8 @@ def create_account(body: UserIn, request: Request, u: A.User = Depends(need_supe
         except A.AccountError as e:
             raise HTTPException(400, str(e))
         audit(s, u.username, "user_create", row.username, f"role={row.role} super={row.is_super} depts={row.departments}", _ip(request))
+        push("security", f"Account {row.username} created ({row.role})", f"departments {', '.join(row.departments)} · by {u.username}", ref_id=row.username,
+             link="admin", feature="admin", session=s)
         s.commit()
         return _row_out(row, 0)
 
@@ -157,6 +160,9 @@ def patch_account(username: str, body: UserPatch, request: Request, u: A.User = 
             raise HTTPException(400, str(e))
         changed = [k for k, v in body.model_dump().items() if v is not None]
         audit(s, u.username, "user_update", row.username, ", ".join("password" if c == "password" else f"{c}={getattr(row, c)}" for c in changed), _ip(request))
+        if any(c in ("role", "is_super", "is_active") for c in changed):
+            push("security", f"Account {row.username} changed", ", ".join(f"{c}={getattr(row, c)}" for c in changed if c != "password") + f" · by {u.username}",
+                 severity="warn", ref_id=row.username, link="admin", feature="admin", session=s)
         if body.is_active is False:
             A.note_login(s, row.username, True)          # clear any lockout so the state is unambiguous
         s.commit()
@@ -171,6 +177,7 @@ def delete_account(username: str, request: Request, u: A.User = Depends(need_sup
         except A.AccountError as e:
             raise HTTPException(400, str(e))
         audit(s, u.username, "user_delete", username.strip().lower(), ip=_ip(request))
+        push("security", f"Account {username.strip().lower()} removed", f"by {u.username}", severity="warn", ref_id=username.strip().lower(), link="admin", feature="admin", session=s)
         s.commit()
     return {"ok": True}
 

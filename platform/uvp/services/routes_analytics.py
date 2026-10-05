@@ -153,6 +153,37 @@ def traffic(camera_id: str = "", hours: int = 24, u: A.User = Depends(need("sear
     return {"hours": hours, "rows": out, "summary": sorted(summary.values(), key=lambda x: -x["avg_vehicles"])}
 
 
+class DetectionBody(BaseModel):
+    enabled: bool | None = None          # global switch
+    camera_id: str | None = None         # per-camera override...
+    on: bool | None = None               # ...true / false, or null to follow the global switch again
+    clear_cameras: bool = False
+
+
+@router.get("/api/detection")
+def detection_state(u: A.User = Depends(current_user)):
+    """AI detection switch: {enabled, cameras: {id: bool}} - workers run inference only where it allows."""
+    from .. import detection as DETECT
+    st = DETECT.state(max_age=0)
+    return st | {"default": settings.detection_default}
+
+
+@router.post("/api/detection")
+def detection_set(body: DetectionBody, request: Request, u: A.User = Depends(need("supervisor"))):
+    from .. import detection as DETECT
+    st = DETECT.update(u.username, enabled=body.enabled, camera_id=body.camera_id, on=body.on, clear_cameras=body.clear_cameras)
+    with SessionLocal() as s:
+        what = f"global {'ON' if st['enabled'] else 'OFF'}" if body.enabled is not None else (f"{body.camera_id} -> {body.on}" if body.camera_id else "reset overrides")
+        audit(s, u.username, "detection_switch", body.camera_id or "global", what, _ip(request))
+        from ..inbox import push
+        push("detection", f"AI detection {what} by {u.username}", "ANPR, counting and face matching run only where detection is on",
+             severity="warn" if (body.enabled is False or body.on is False) else "info", ref_id=body.camera_id or "global", link="wall", session=s)
+        s.commit()
+    from .api import broadcast
+    broadcast("detection", st)
+    return st
+
+
 @router.get("/api/counts/timeline")
 def counts_timeline(hours: int = 1, camera_id: str = "", u: A.User = Depends(current_user)):
     """Vehicles and persons in view per camera per minute (from the analytics worker's traffic windows) plus the

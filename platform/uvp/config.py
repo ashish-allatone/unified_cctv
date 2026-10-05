@@ -83,6 +83,10 @@ class Settings:
     login_max_failures: int = int(_env("LOGIN_MAX_FAILURES", "5"))
     login_lockout_s: int = int(_env("LOGIN_LOCKOUT_S", "900"))
     s3_sse: str = _env("S3_SSE", "")                                  # "AES256" or "aws:kms" for at-rest encryption headers
+    s3_cold_class: str = _env("S3_COLD_CLASS", "")                    # storage class for archived (cold) objects, e.g. STANDARD_IA / InfrequentAccess
+    voice_callback_key: str = _env("VOICE_CALLBACK_KEY", "")           # shared key the voice dialer's result webhook must present
+    archival_hour_ist: int = int(_env("ARCHIVAL_HOUR_IST", "2"))      # nightly archival run, hour of day (IST)
+    archival_cold_prefix: str = _env("ARCHIVAL_COLD_PREFIX", "cold")  # archived objects / row exports go under <prefix>/
     relay_public_base: str = _env("RELAY_PUBLIC_BASE", "")            # e.g. https://cctv.example.gov.in/relay when behind the TLS proxy
     sources_file: Path = Path(_env("SOURCES_FILE", str(ROOT / "config" / "sources.yaml")))
     users_file: Path = Path(_env("USERS_FILE", str(ROOT / "config" / "users.yaml")))
@@ -116,6 +120,7 @@ class Settings:
     analytics_fps: float = float(_env("ANALYTICS_FPS", "2"))          # zone analytics sampling rate per camera
     analytics_count_all: bool = _env("ANALYTICS_COUNT_ALL", "1") == "1"   # vehicle + person counting and crowd alert on every pulled camera
     crowd_max_persons: int = int(_env("CROWD_MAX_PERSONS", "25"))       # default crowd alert threshold (persons in view)
+    detection_default: bool = _env("DETECTION_DEFAULT", "on").lower() in ("1", "on", "true", "yes")   # AI detection until the console switch is pressed
     geocode_url: str = _env("GEOCODE_URL", "https://nominatim.openstreetmap.org/search")   # OSM Nominatim (or your own instance)
     geocode_region: str = _env("GEOCODE_REGION", "Gujarat, India")                            # appended to camera names
     geocode_contact: str = _env("GEOCODE_CONTACT", "")                                        # e-mail for the Nominatim User-Agent policy

@@ -115,10 +115,12 @@ def test_plate_review_corrections_and_weekly_report(client):
     from uvp.db import AnprEvent, SessionLocal, utcnow
     h = tok(client)
     now = utcnow()
+    week_start = (now - dt.timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    base = now if now - week_start > dt.timedelta(hours=6) else week_start + dt.timedelta(hours=6)   # keep every read inside this week
     with SessionLocal() as s:
         for i, (plate, tags, conf) in enumerate([("MP04ZR7493", [], 0.95), ("MP02ZR7493", ["low_confidence"], 0.6), ("MP04????", ["non_standard_plate", "invalid_format"], 0.5),
                                                  ("KA05MN7788", ["night"], 0.9), ("MH12AB1234", [], 0.97)]):
-            s.add(AnprEvent(id=f"{i:032x}", camera_id="police-cam1" if i < 3 else "police-cam2", department="Police", ts=now - dt.timedelta(hours=i + 1),
+            s.add(AnprEvent(id=f"{i:032x}", camera_id="police-cam1" if i < 3 else "police-cam2", department="Police", ts=base - dt.timedelta(hours=i + 1),
                             plate=plate, plate_raw=plate, plate_valid="?" not in plate, confidence=conf, reads=3, tags=tags, clip_key="-", crop_key="-", frame_key="-"))
         s.commit()
     q = client.get("/api/reports/anpr/review-queue?limit=10", headers=h).json()
@@ -160,16 +162,15 @@ def test_plate_review_corrections_and_weekly_report(client):
 
 # ----------------------------------------------------------------------------- i18n, scripts, PWA lang
 def test_i18n_dictionaries_complete_and_served(client):
-    web = ROOT / "platform" / "webapp"
-    en = json.loads((web / "public" / "i18n" / "en.json").read_text(encoding="utf-8"))
-    hi = json.loads((web / "public" / "i18n" / "hi.json").read_text(encoding="utf-8"))
+    en = json.loads((ROOT / "platform" / "web" / "i18n" / "en.json").read_text(encoding="utf-8"))
+    hi = json.loads((ROOT / "platform" / "web" / "i18n" / "hi.json").read_text(encoding="utf-8"))
     assert set(en) == set(hi) and all(v.strip() for v in hi.values())
-    src = "\n".join(p.read_text(encoding="utf-8") for p in (web / "src").rglob("*.js*"))
+    html = (ROOT / "platform" / "web" / "index.html").read_text()
     import re
-    keys = set(re.findall(r'\bt\("([a-z_]+\.[a-z_.]+)"', src)) | set(re.findall(r'\bkey: "([a-z_]+\.[a-z_]+)"', src))
-    assert keys and keys <= set(en), keys - set(en)
+    keys = set(re.findall(r'data-i18n="([^"]+)"', html)) | set(re.findall(r'data-i18n-placeholder="([^"]+)"', html))
+    assert keys <= set(en), keys - set(en)
     assert client.get("/i18n/hi.json").status_code == 200
-    assert 'role="status"' in src and 'className="skip-link"' in src and 'aria-label="Close"' in src
+    assert 'role="status"' in html and 'class="skip-link"' in html and 'aria-label="Close"' in html
 
 
 def test_installer_scripts_are_valid_shell():

@@ -344,3 +344,29 @@ def test_counts_timeline_and_count_all_defaults(client, monkeypatch):
     row = [c for c in r["cameras"] if c["camera_id"] == any_cam][0]
     assert len(row["points"]) == 3 and row["points"][0][2] == 14.0 and row["peak_persons"] == 14 and row["avg_vehicles"] == 5.0
     assert row["crowd_max"] == settings.crowd_max_persons and r["crowd_default"] == settings.crowd_max_persons
+
+
+def test_detection_switch_api_and_worker_gate(client, monkeypatch):
+    """The console switch turns AI detection off globally or per camera; workers consult detection.allows()."""
+    from uvp import detection as D
+    h = tok(client)
+    st = client.get("/api/detection", headers=h).json()
+    assert st["enabled"] is True and st["cameras"] == {}
+    # viewer cannot switch, supervisor can
+    assert client.post("/api/detection", json={"enabled": False}, headers=tok(client, "viewer", "viewer123")).status_code == 403
+    st = client.post("/api/detection", json={"enabled": False}, headers=h).json()
+    assert st["enabled"] is False
+    assert D.allows("police-cam1") is False
+    # per-camera override wins over the global switch
+    st = client.post("/api/detection", json={"camera_id": "police-cam1", "on": True}, headers=h).json()
+    assert st["cameras"] == {"police-cam1": True} and D.allows("police-cam1") is True and D.allows("police-cam2") is False
+    # back to following the global switch, then global on again
+    st = client.post("/api/detection", json={"camera_id": "police-cam1", "on": None}, headers=h).json()
+    assert st["cameras"] == {} and D.allows("police-cam1") is False
+    st = client.post("/api/detection", json={"enabled": True}, headers=h).json()
+    assert D.allows("police-cam2") is True
+    acts = [a["action"] for a in client.get("/api/audit?limit=10", headers=h).json()]
+    assert "detection_switch" in acts
+    # survives a "restart": a fresh cache read comes from the database
+    D._cache["state"] = None
+    assert D.state()["enabled"] is True

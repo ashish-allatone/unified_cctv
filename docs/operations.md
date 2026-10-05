@@ -215,3 +215,104 @@ effective cap, and the Sources page says so:
 Put that number in `sources.yaml` to make it permanent (the learned value is forgotten when the adapters
 restart). If **all** pulls are down, that is the 401 back-off (credentials rejected or a lockout): wait the
 10 minutes it announces, then `docker compose restart adapters`.
+
+## Connecting a CP Plus / Dahua DVR or NVR (the recorder behind KVMS Pro / KVMS Pro Lite)
+
+KVMS Pro is CP Plus's viewing app; it reaches the recorder through the vendor's P2P cloud, which the platform
+cannot use. The platform connects to the **recorder itself over RTSP** (CP Plus is a Dahua OEM, so the
+`cpplus` preset applies). Once:
+
+1. On the DVR/NVR: *Network → Access → RTSP* enabled (port 554); create a **viewer-only** user for the
+   platform (never the admin account). Note the LAN IP.
+2. The recorder must be reachable from the server. On the same LAN nothing more is needed. From the cloud VM:
+   forward TCP 554 on the site router to the recorder (or use the router's DDNS name), and allow only the VM's
+   public IP in the router if it offers that. A site-to-site VPN is the proper long-term answer.
+3. Console → *Sources → Connect a device*: type **NVR / DVR by vendor**, vendor **cpplus**, host = public IP /
+   DDNS name (or LAN IP), RTSP port 554, channels = number of cameras, the viewer user and password,
+   **Record: all cameras** → *Test connection* → *Save & connect*. The cameras appear within seconds.
+
+Recording to the bucket: with `OBJECT_STORAGE=s3` and the Oracle Object Storage keys in `.env`
+(`S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_PREFIX`), the relay records each camera in
+60-second fMP4 segments and the archiver copies them to the bucket continuously — *Playback* streams them back
+from there. `RECORD_MODE=all` records every camera of every source; *Record: all* on the device does it for
+that recorder only. Storage: about 650 GB per camera per month at 2 Mbit/s, so set the bucket's lifecycle rule
+(e.g. delete after 30 days) to match the retention policy.
+
+### Remote recorder with no port forwarding: the site connector (push)
+
+When the client's DVR / NVR sits behind a home / office router (the usual case for a recorder viewed with a
+phone app such as KVMS Pro), nothing can reach it from outside and the vendor's P2P cloud cannot be used by
+anyone else. The platform's answer is a **site connector**: a small box (any mini-PC or Raspberry Pi 4 with
+Docker) on the recorder's LAN that reads the channels over RTSP and pushes them to the command centre over
+**one outbound connection** (TCP 8554). No router change, no P2P, no inbound port.
+
+1. Console → *Sources → Connect a device* → type **Remote site (site connector pushes the streams)**: name,
+   department, vendor (cpplus / dahua / hikvision / …), the recorder's LAN IP, RTSP port, channel count, ANPR
+   yes/no → *Save*. The platform creates the cameras (`<name>-ch1` …), registers them as **publisher** paths
+   on the relay and generates a secret **publish key** for the site (stored encrypted).
+2. Device list → **Site connector** → downloads `site-connector-<id>.zip`: `docker-compose.yml`, `run.sh`,
+   `cameras.txt` (one line per channel, vendor stream paths already filled in), `.env` (server address + the
+   key; only `DVR_HOST`, `DVR_USER`, `DVR_PASS` to fill), `README.txt`.
+3. At the site: unzip on the box, edit `.env`, `docker compose up -d`. Each channel is copied (no re-encoding)
+   to `rtsp://site:<key>@<server>:8554/<camera>/main`; the relay accepts the publish only with that site's key
+   and only on `/main` (`/internal/relay-auth`). Within ~10 s the cameras are **live** on the wall, recorded
+   to the bucket if *Record* is on, and counted / ANPR'd like any other camera (pushed streams count as
+   steady sessions).
+
+Server side: TCP 8554 must be open to the sites (OCI security list + `firewall-cmd --add-port=8554/tcp
+--permanent`), the same as 8889/8888. Bandwidth is the site's upload: ~2 Mbit/s per channel at the recorder's
+sub-stream bitrate; use the sub-stream template in `cameras.txt` (e.g. `subtype=1` for CP Plus / Dahua) for
+sites on weak links. Rotating a key: *Edit* the device and save with a new password field value, then
+redistribute the bundle.
+
+
+## Voice-call alerts (BulkOBD outbound dialer)
+
+Channel type `voice` in `config/notify.yaml` places an automated phone call through a BulkOBD-compatible
+dialer (`POST <url>/voiceBlast`). Typical use: phone the duty officer for high-priority watchlist hits.
+
+```yaml
+channels:
+  voice_call:
+    type: voice
+    enabled: true
+    url: ${VOICE_OBD_URL}          # e.g. http://180.150.248.111:8096/OBDSEA  (base URL of the dialer)
+    username: ${VOICE_OBD_USER}    # dialer account (in .env, never in this file)
+    password: ${VOICE_OBD_PASS}
+    language: "1"
+    max_call_s: 45
+    ack_digit: "1"                 # the call ends with "Press 1 to acknowledge"; pressing it acknowledges the alert
+    # sound_id: 2350               # play a pre-recorded clip (uploaded on the dialer panel) instead of text-to-speech
+routes:
+  - {kind: alert, subkind: exact, priority: high, channel: voice_call, to: ["+919999999999", "9888888888"]}
+```
+
+What the call says (text-to-speech, plate spelt digit by digit): *"Unified CCTV alert. Watch list vehicle
+G J 0 1 A B 1 2 3 4 seen at Mohanpura at 14:05. Stolen vehicle. Press 1 to acknowledge."* Incidents,
+camera offline and break-glass events have their own sentences (`uvp.notify.speak_text`).
+
+Every call is a row in Admin → Notifications (channel `voice`); **Test** next to the channel places a test
+call. Give the provider the result webhook
+`https://<server>/api/integrations/voice/callback?key=<VOICE_CALLBACK_KEY>`: after each attempt they POST
+number / dialstatus / response / duration, the row becomes `answered` / `no_answer` / `busy`, and when the
+ack digit was pressed the alert is acknowledged as `voice:<number>` and a notification is raised.
+
+Numbers: 10-digit Indian numbers get the 91 prefix automatically; `+` and spaces are stripped. Secrets only
+in `.env` (`VOICE_OBD_URL`, `VOICE_OBD_USER`, `VOICE_OBD_PASS`, `VOICE_CALLBACK_KEY`).
+
+### Changing who is notified from the console
+
+Admin → Notification channels: each channel has **Turn on / Turn off** and **Test**; the **Who is notified**
+table is the routing table (event, filters, channel, recipients). Edit the numbers / addresses and press
+**Save routes** — the saved table replaces `routes:` from `notify.yaml` (shown as "edited in the console");
+**Use yaml** goes back to the file. Credentials never move: they stay in `notify.yaml` / `.env`.
+
+Dialer replies such as `Campaign Can schedule between 9 AM to 7 PM` are shown as **failed** with the reason:
+the provider's account only places calls in that window — ask them to allow 24x7 calling for alert use, or
+add an SMS / WhatsApp route for night-time alerts.
+
+**Local voice clips.** The BulkOBD dialer accepts TTS campaigns only as form-data and, on some accounts, plays
+silence for them. The channel therefore defaults to `tts: local`: the sentence is spoken with espeak-ng inside
+the api container, converted to an 8 kHz MP3, uploaded with `/uploadSound`, and the call plays that clip
+(`camp_type` 1, or 2 with `ack_digit`). The Sent log shows `local voice clip, sound <id>`. Set `tts: dialer`
+to use the dialer's own text-to-speech instead; `sound_id:` always plays a fixed pre-recorded clip.

@@ -68,7 +68,14 @@ def internal(x_internal_secret: str = Header(default="")) -> None:
 def _parse_time(v: str | None) -> dt.datetime | None:
     if not v:
         return None
-    t = dt.datetime.fromisoformat(v)
+    import re
+    v = re.sub(r" (\d\d:\d\d)$", r"+\1", v.strip())        # a '+' in a query string arrives as a space
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+        v += "T00:00:00"
+    try:
+        t = dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(400, f"bad time {v!r}: use ISO 8601, e.g. 2026-09-01T00:00:00+05:30")
     return t if t.tzinfo else t.replace(tzinfo=dt.timezone(dt.timedelta(minutes=330)))
 
 

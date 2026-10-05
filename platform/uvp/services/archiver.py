@@ -160,112 +160,16 @@ def retention_policy() -> dict:
     return {"default": default, **{k: {**default, **(v or {})} for k, v in cfg.items() if k != "default"}}
 
 
-def _active_holds(s) -> list:
-    return list(s.scalars(select(LegalHold).where(LegalHold.released_at.is_(None))))
-
-
-def _event_held(ev: AnprEvent, holds: list) -> bool:
-    for h in holds:
-        if h.kind == "plate" and h.value == ev.plate:
-            return True
-        if h.kind == "event" and h.value == ev.id:
-            return True
-        if h.kind == "camera" and h.value == ev.camera_id and (h.from_ts is None or ev.ts >= h.from_ts) and \
-                (h.to_ts is None or ev.ts <= h.to_ts):
-            return True
-    return False
-
-
-def _recording_held(r: Recording, holds: list) -> bool:
-    for h in holds:
-        if h.kind == "camera" and h.value == r.camera_id and (h.from_ts is None or r.start_ts + dt.timedelta(seconds=r.duration_s) >= h.from_ts) \
-                and (h.to_ts is None or r.start_ts <= h.to_ts):
-            return True
-    return False
-
-
 def apply_retention() -> dict:
-    """Delete what is older than the department's policy, except records under legal hold."""
-    pol = retention_policy()
-    now = utcnow()
-    removed: dict[str, int] = {}
-    st = store()
-    with SessionLocal() as s:
-        holds = _active_holds(s)
-        depts = {d for (d,) in s.execute(select(Camera.department).distinct())}
-        depts |= {d for (d,) in s.execute(select(AnprEvent.department).distinct())}
-        for dept in depts:
-            p = pol.get(dept, pol["default"])
-            # recordings
-            cutoff = now - dt.timedelta(days=float(p["recordings_days"]))
-            for r in s.scalars(select(Recording).where(Recording.department == dept, Recording.start_ts < cutoff)):
-                if _recording_held(r, holds):
-                    continue
-                try:
-                    st.delete(r.key)
-                except Exception:  # noqa: BLE001
-                    pass
-                s.delete(r)
-                removed[f"{dept}/recordings"] = removed.get(f"{dept}/recordings", 0) + 1
-            # clips / crops on events that stay, then whole events
-            cut_clip = now - dt.timedelta(days=float(p["clips_days"]))
-            cut_crop = now - dt.timedelta(days=float(p["crops_days"]))
-            cut_ev = now - dt.timedelta(days=float(p["events_days"]))
-            oldest = min(cut_clip, cut_crop, cut_ev)
-            for ev in s.scalars(select(AnprEvent).where(AnprEvent.department == dept, AnprEvent.ts < oldest)):
-                if _event_held(ev, holds):
-                    continue
-                if ev.ts < cut_ev:
-                    for k in (ev.clip_key, ev.crop_key, ev.frame_key):
-                        if k and k != "-":
-                            try:
-                                st.delete(k)
-                            except Exception:  # noqa: BLE001
-                                pass
-                    for rel in (ev.crop_path, ev.frame_path):
-                        fp = settings.data_dir / rel if rel else None
-                        if fp and fp.exists():
-                            fp.unlink()
-                    s.delete(ev)
-                    removed[f"{dept}/events"] = removed.get(f"{dept}/events", 0) + 1
-                    continue
-                if ev.ts < cut_clip and ev.clip_key not in ("", "-"):
-                    try:
-                        st.delete(ev.clip_key)
-                    except Exception:  # noqa: BLE001
-                        pass
-                    ev.clip_key = "-"
-                    removed[f"{dept}/clips"] = removed.get(f"{dept}/clips", 0) + 1
-                if ev.ts < cut_crop:
-                    for attr in ("crop_key", "frame_key"):
-                        k = getattr(ev, attr)
-                        if k and k != "-":
-                            try:
-                                st.delete(k)
-                            except Exception:  # noqa: BLE001
-                                pass
-                            setattr(ev, attr, "-")
-                            removed[f"{dept}/crops"] = removed.get(f"{dept}/crops", 0) + 1
-        # events index (Elasticsearch) and audit log
-        try:
-            from ..search import backend
-            backend().delete_older_than(now - dt.timedelta(days=float(pol["default"]["events_days"])))
-        except Exception:  # noqa: BLE001
-            pass
-        cut_audit = now - dt.timedelta(days=float(pol["default"]["audit_days"]))
-        n = s.query(AuditLog).filter(AuditLog.ts < cut_audit).count()
-        if n:
-            # keep the chain verifiable: only trim from the head, and record the trim itself
-            for r in s.scalars(select(AuditLog).where(AuditLog.ts < cut_audit)):
-                s.delete(r)
-            removed["audit"] = n
-            audit(s, "archiver", "audit_trim", "", f"rows={n} older_than={cut_audit.date()}")
-        s.commit()
-    if removed:
-        for k, n in removed.items():
-            M.RETENTION_REMOVED.labels(k.split("/")[-1]).inc(n)
-        log.info("retention removed %s", removed)
-    return removed
+    """Apply the archival policies once (Admin -> Archival; defaults from rules.yaml). Returns {"<dept>/<class>": n}.
+    Kept for tooling and tests; the service itself runs `archival.tick()` (one run per day at ARCHIVAL_HOUR_IST)."""
+    from ..archival import run
+    return run("schedule", "archiver")["removed"]
+
+
+def archival_tick() -> None:
+    from ..archival import tick
+    tick()
 
 
 # ----------------------------------------------------------------------------- main
@@ -296,6 +200,9 @@ def scheduled_reports() -> None:
         notify("report", {"id": p.stem, "department": "*", "ts": utcnow().isoformat(), "priority": "low",
                           "subject": f"ANPR weekly report {rep['week_start']}", "reads": rep["reads"], "reviewed": rep["reviewed"],
                           "accuracy_pct": rep["accuracy_pct"], "path": str(p)})
+        from ..inbox import push
+        push("report", f"Weekly ANPR accuracy report ready ({rep['week_start']})", f"{rep['reads']} reads reviewed {rep['reviewed']}, accuracy {rep['accuracy_pct']}%",
+             ref_id=p.stem, link="reports", feature="reports")
         log.info("weekly ANPR report written: %s", p)
     if _last_usage != key:
         _last_usage = key
@@ -312,7 +219,7 @@ def main() -> None:
              settings.record_mode)
     threading.Thread(target=_loop, args=(archive_events, settings.archive_interval_s), daemon=True).start()
     threading.Thread(target=_loop, args=(archive_segments, settings.archive_interval_s), daemon=True).start()
-    _loop(apply_retention, 3600)
+    _loop(archival_tick, 300)
 
 
 if __name__ == "__main__":

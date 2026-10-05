@@ -153,14 +153,89 @@ def delete_hook(wid: str, request: Request, u: A.User = Depends(need("admin"))):
 # ----------------------------------------------------------------------------- notifications log + channels
 @router.get("/api/admin/notifications")
 def notifications(limit: int = 200, u: A.User = Depends(need("admin"))):
-    from ..notify import cfg
+    from ..notify import ROUTE_KINDS, cfg, routes_for_console
     c = cfg()
     with SessionLocal() as s:
         rows = s.scalars(select(Notification).order_by(Notification.ts.desc()).limit(min(limit, 1000))).all()
-    return {"channels": [{"name": n, "type": ch.get("type"), "enabled": ch.get("enabled", True)} for n, ch in (c.get("channels") or {}).items()],
-            "routes": c.get("routes") or [],
+        routes = routes_for_console(s)
+    return {"channels": [{"name": n, "type": ch.get("type"), "enabled": ch.get("enabled", True), "configured": bool(ch.get("url") or ch.get("host")) and
+                          (ch.get("type") not in ("voice",) or bool(ch.get("username")))} for n, ch in (c.get("channels") or {}).items()],
+            "routes": routes, "routes_source": c.get("routes_source", "yaml"), "kinds": ROUTE_KINDS,
             "log": [{"ts": n.ts.isoformat(), "channel": n.channel, "recipient": n.recipient, "kind": n.kind, "subject": n.subject,
                      "status": n.status, "detail": n.detail[:200], "attempts": n.attempts} for n in rows]}
+
+
+class RoutesBody(BaseModel):
+    routes: list[dict]
+
+
+@router.put("/api/admin/notifications/routes")
+def save_routes(body: RoutesBody, request: Request, u: A.User = Depends(need("admin"))):
+    """Replace the notification routing table (who is called / messaged for which event). Credentials stay in
+    config/notify.yaml + .env; this only changes recipients, filters and which channel each event goes to."""
+    from ..notify import save_routes_for_console
+    with SessionLocal() as s:
+        try:
+            routes = save_routes_for_console(s, body.routes, u.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        audit(s, u.username, "notify_routes", "", f"{len(routes)} route(s): " + "; ".join(f"{r['kind']}->{r['channel']} {','.join(r['to'])}" for r in routes)[:900], _ip(request))
+        s.commit()
+    return {"routes": routes, "routes_source": "console"}
+
+
+@router.delete("/api/admin/notifications/routes")
+def reset_routes(request: Request, u: A.User = Depends(need("admin"))):
+    """Forget the console routing table and go back to config/notify.yaml."""
+    from ..db import Setting
+    with SessionLocal() as s:
+        row = s.get(Setting, "notify_routes")
+        if row is not None:
+            s.delete(row)
+        audit(s, u.username, "notify_routes_reset", "", "", _ip(request))
+        s.commit()
+    return {"ok": True}
+
+
+class ChannelBody(BaseModel):
+    enabled: bool
+
+
+@router.patch("/api/admin/notifications/channels/{name}")
+def toggle_channel(name: str, body: ChannelBody, request: Request, u: A.User = Depends(need("admin"))):
+    from ..db import get_setting, set_setting
+    from ..notify import yaml_cfg
+    if name not in (yaml_cfg().get("channels") or {}):
+        raise HTTPException(404, "unknown channel (channels are defined in config/notify.yaml)")
+    with SessionLocal() as s:
+        ov = dict(get_setting(s, "notify_channels", {}))
+        ov[name] = {"enabled": body.enabled}
+        set_setting(s, "notify_channels", ov, u.username)
+        audit(s, u.username, "notify_channel", name, "on" if body.enabled else "off", _ip(request))
+        s.commit()
+    return {"name": name, "enabled": body.enabled}
+
+
+@router.post("/api/integrations/voice/callback")
+async def voice_callback(request: Request, key: str = ""):
+    """Result webhook of the voice-call dialer (BulkOBD). Register
+    `https://<server>/api/integrations/voice/callback?key=<VOICE_CALLBACK_KEY>` with the provider; it POSTs
+    number / dialstatus / response / duration / campid after every call attempt (JSON or form)."""
+    from ..notify import voice_callback as _cb
+    if not settings.voice_callback_key or key != settings.voice_callback_key:
+        raise HTTPException(403, "bad key")
+    ctype = request.headers.get("content-type", "")
+    if "json" in ctype:
+        data = await request.json()
+    else:
+        form = await request.form()
+        data = dict(form)
+        if not data:
+            try:
+                data = await request.json()
+            except Exception:  # noqa: BLE001
+                data = {}
+    return _cb(data if isinstance(data, dict) else {})
 
 
 @router.post("/api/admin/notifications/test")

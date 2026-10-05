@@ -46,9 +46,10 @@ class User:
     provider: str = "local"
     tenant: str = ""
     is_super: bool = False                     # super admin: may create / remove console accounts
+    grant_features: list[str] = field(default_factory=list)   # features that came from time-bound grants (not the role)
 
-    def can(self, role: str) -> bool:          # legacy role ladder
-        return ROLE_RANK.get(self.role, -1) >= ROLE_RANK[role]
+    def can(self, role: str) -> bool:          # legacy role ladder (custom roles rank by what they may do)
+        return rbac.role_rank(self.role) >= ROLE_RANK[role]
 
     def has(self, feature: str) -> bool:
         return feature in self.features or (not self.features and feature in rbac.role_features(self.role))
@@ -144,8 +145,8 @@ def create_account(session, username: str, password: str, role: str, departments
     username = (username or "").strip().lower()
     if not USERNAME_RE.match(username):
         raise AccountError("username: 3-64 characters, lowercase letters, digits, . _ @ -")
-    if role not in ROLE_RANK:
-        raise AccountError(f"role must be one of {', '.join(ROLE_RANK)}")
+    if not rbac.is_role(role):
+        raise AccountError(f"role must be one of {', '.join(sorted(rbac.roles()))}")
     if is_super and role != "admin":
         raise AccountError("a super admin must have the admin role")
     validate_password(password)
@@ -174,8 +175,8 @@ def update_account(session, username: str, *, role: str | None = None, departmen
     if row is None or row.provider != "db":
         raise AccountError("no such account")
     if role is not None:
-        if role not in ROLE_RANK:
-            raise AccountError(f"role must be one of {', '.join(ROLE_RANK)}")
+        if not rbac.is_role(role):
+            raise AccountError(f"role must be one of {', '.join(sorted(rbac.roles()))}")
         if row.is_super and role != "admin" and is_super is not False:
             raise AccountError("a super admin keeps the admin role; remove super admin first")
         row.role = role
@@ -460,6 +461,7 @@ def with_effective_access(session, u: User) -> User:
     from .tenancy import clip_departments, tenant_for
     eff = rbac.effective(session, u.username, u.role, u.departments, u.cameras)
     u.features, u.departments, u.cameras = eff["features"], eff["departments"], eff["cameras"]
+    u.grant_features = eff["grant_features"]
     u.break_glass = eff["break_glass"]
     u.tenant = tenant_for(u.departments, u.tenant)
     u.departments = clip_departments(u.departments, u.tenant)
@@ -472,7 +474,7 @@ def issue_token(user: User, ttl_s: int | None = None, purpose: str = "session") 
     ttl = ttl_s or int((auth_cfg().get("session") or {}).get("ttl_hours", settings.token_ttl_s / 3600) * 3600)
     payload = {"sub": user.username, "r": user.role, "d": user.departments, "f": user.features, "c": user.cameras,
                "mfa": user.mfa, "bg": user.break_glass, "p": user.provider, "tn": user.tenant, "su": user.is_super,
-               "t": purpose, "iat": now, "exp": now + ttl}
+               "g": user.grant_features, "rv": rbac.roles_version(), "t": purpose, "iat": now, "exp": now + ttl}
     return jwt.encode(payload, settings.token_secret, algorithm="HS256")
 
 
@@ -481,8 +483,12 @@ def verify_token(token: str, purpose: str = "session") -> User | None:
         p = jwt.decode(token, settings.token_secret, algorithms=["HS256"])
         if p.get("t", "session") != purpose:
             return None
-        return User(p["sub"], p["r"], p["d"], p.get("f", []), p.get("c", []), p.get("mfa", False), p.get("bg"),
-                    p.get("p", "local"), p.get("tn", ""), bool(p.get("su", False)))
+        feats = p.get("f", [])
+        if p.get("p") != "apikey" and "rv" in p and p["rv"] != rbac.roles_version():
+            # a role was edited after this token was issued: follow the role's current permissions (+ granted extras)
+            feats = sorted(rbac.role_features(p["r"]) | set(p.get("g", [])))
+        return User(p["sub"], p["r"], p["d"], feats, p.get("c", []), p.get("mfa", False), p.get("bg"),
+                    p.get("p", "local"), p.get("tn", ""), bool(p.get("su", False)), list(p.get("g", [])))
     except Exception:  # noqa: BLE001
         return None
 
