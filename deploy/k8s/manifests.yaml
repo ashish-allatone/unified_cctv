@@ -363,7 +363,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
         command:
         - python
         - -m
@@ -541,7 +541,7 @@ spec:
     spec:
       containers:
       - name: adapters
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
         command:
         - python
         - -m
@@ -680,7 +680,7 @@ spec:
     spec:
       containers:
       - name: indexer
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
         command:
         - python
         - -m
@@ -819,7 +819,7 @@ spec:
     spec:
       containers:
       - name: archiver
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
         command:
         - python
         - -m
@@ -958,7 +958,7 @@ spec:
     spec:
       containers:
       - name: analytics
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
         command:
         - python
         - -m
@@ -1097,7 +1097,7 @@ spec:
     spec:
       containers:
       - name: hotlist
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
         command:
         - python
         - -m
@@ -1236,7 +1236,7 @@ spec:
     spec:
       containers:
       - name: anpr
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
         command:
         - sh
         - -c
