@@ -206,3 +206,5 @@ if __name__ == "__main__":
         print(f"{len(docs)} manifests OK")
     else:
         print(yaml.safe_dump_all(docs, sort_keys=False))
+if v.get("imagePullSecret"):
+    pod["imagePullSecrets"] = [{"name": v["imagePullSecret"]}]
