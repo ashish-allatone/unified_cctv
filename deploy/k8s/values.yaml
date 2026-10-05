@@ -9,7 +9,8 @@ publicHost: cctv.example.gov.in
 storageClass: unified-cctv-fss-data  # change according to oci
 # Managed / HA data services (see docs/ha.md): the platform never runs these itself in production
 database_url: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
-kafka_bootstrap: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+#kafka_bootstrap: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092  --> change
+kafka_bootstrap: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
 es_url: http://elasticsearch.search.svc:9200
 object_storage: {endpoint: "https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com", region: ap-mumbai-1, bucket: uvp-video}
 relays: 2                    # StatefulSet replicas; cameras are spread by rendezvous hashing, failover automatic
