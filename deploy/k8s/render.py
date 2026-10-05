@@ -63,39 +63,60 @@ def deployment(v: dict, name: str, cmd: list[str], spec: dict, env_extra: dict |
                      "template": {"metadata": {"labels": {"app": name}, "annotations": {"prometheus.io/scrape": "true", "prometheus.io/port": str((ports or [9100])[-1])}},
                                   "spec": pod}}}
 
-
+#add new code
 def render(v: dict) -> list[dict]:
     ns = v["namespace"]
     docs: list[dict] = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": ns}}]
-    docs.append({"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "uvp-config", "namespace": ns},
-                 "data": {f: (HERE.parent.parent / "config" / f).read_text() for f in
-                          ("sources.yaml", "users.yaml", "rules.yaml", "auth.yaml", "analytics.yaml", "hotlists.yaml", "notify.yaml",
-                           "tenants.yaml", "vendors.yaml", "mediamtx.yml")}})
-    docs.append({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "uvp-secrets", "namespace": ns}, "type": "Opaque",
-                 "stringData": {k: "CHANGE-ME" for k in ("token-secret", "internal-secret", "relay-internal-pass", "s3-access-key",
-                                                          "s3-secret-key", "police-onvif-pass", "muni-api-pass")}})
-  #--- comment--
-  
-  #for name, size in (("uvp-data", "50Gi"), ("uvp-recordings", f"{v['relayRecordingsGb'] * v['relays']}Gi")):
-     #   docs.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": {"name": name, "namespace": ns},
-      #               "spec": {"accessModes": ["ReadWriteMany"], "storageClassName": v["storageClass"], "resources": {"requests": {"storage": size}}}})
-    
-  #add new value
-  for name, size, storage_class, volume_name in (
-    ("uvp-data", "50Gi", "unified-cctv-fss-data", "uvp-data-fss-pv"),
-    ("uvp-recordings", f"{v['relayRecordingsGb'] * v['relays']}Gi", "unified-cctv-fss-recordings", "uvp-recordings-fss-pv"),
-):
+
     docs.append({
         "apiVersion": "v1",
-        "kind": "PersistentVolumeClaim",
-        "metadata": {"name": name, "namespace": ns},
-        "spec": {
-            "accessModes": ["ReadWriteMany"],
-            "storageClassName": storage_class,
-            "volumeName": volume_name,
-            "resources": {"requests": {"storage": size}},
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": "uvp-config",
+            "namespace": ns
         },
+        "data": {
+            f: (HERE.parent.parent / "config" / f).read_text()
+            for f in (
+                "sources.yaml",
+                "users.yaml",
+                "rules.yaml",
+                "auth.yaml",
+                "analytics.yaml",
+                "hotlists.yaml",
+                "notify.yaml",
+                "tenants.yaml",
+                "vendors.yaml",
+                "mediamtx.yml"
+            )
+        }
     })
+
+    docs.append({
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {
+            "name": "uvp-secrets",
+            "namespace": ns
+        },
+        "type": "Opaque",
+        "stringData": {
+            k: "CHANGE-ME"
+            for k in (
+                "token-secret",
+                "internal-secret",
+                "relay-internal-pass",
+                "s3-access-key",
+                "s3-secret-key",
+                "police-onvif-pass",
+                "muni-api-pass"
+            )
+        }
+    })
+
+    # PVCs are managed separately through:
+    # deploy/k8s/uvp-fss-pv.yaml
+    # deploy/k8s/uvp-fss-pvc.yaml
   
   # api
     docs.append(deployment(v, "api", ["python", "-m", "uvicorn", "uvp.services.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"],
