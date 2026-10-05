@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: kafka
-          image: apache/kafka:3.8.0
+          image: docker.io/apache/kafka:3.8.0
           imagePullPolicy: IfNotPresent
 
           ports:
