@@ -1,4 +1,3 @@
-```python
 #!/usr/bin/env python3
 """Render Kubernetes manifests for the platform from values.yaml.
 
@@ -823,4 +822,3 @@ if __name__ == "__main__":
                 sort_keys=False,
             )
         )
-```
