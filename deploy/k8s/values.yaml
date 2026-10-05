@@ -19,4 +19,4 @@ archiver: {replicas: 1}
 adapters: {replicas: 1}
 indexer: {replicas: 2}
 hotlist: {replicas: 1}
-keda: true                   # ScaledObject for the indexer on Kafka lag (needs KEDA installed)
+keda: false                   # ScaledObject for the indexer on Kafka lag (needs KEDA installed)
