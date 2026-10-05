@@ -54,10 +54,25 @@ def deployment(v: dict, name: str, cmd: list[str], spec: dict, env_extra: dict |
         c["volumeMounts"] += [{"name": "data", "mountPath": "/data"}, {"name": "recordings", "mountPath": "/recordings", "readOnly": True}]
     if spec.get("gpu"):
         c["resources"]["limits"]["nvidia.com/gpu"] = 1
-    pod = {"containers": [c], "volumes": [{"name": "config", "configMap": {"name": "uvp-config"}}]}
+    #pod = {"containers": [c], "volumes": [{"name": "config", "configMap": {"name": "uvp-config"}}]}
+    #if volumes:
+     #   pod["volumes"] += [{"name": "data", "persistentVolumeClaim": {"claimName": "uvp-data"}},
+      #                     {"name": "recordings", "persistentVolumeClaim": {"claimName": "uvp-recordings"}}]
+
+                 #add new code
+        pod = {"containers": [c], "volumes": [{"name": "config", "configMap": {"name": "uvp-config"}}]}
+
     if volumes:
-        pod["volumes"] += [{"name": "data", "persistentVolumeClaim": {"claimName": "uvp-data"}},
-                           {"name": "recordings", "persistentVolumeClaim": {"claimName": "uvp-recordings"}}]
+        pod["volumes"] += [
+            {"name": "data", "persistentVolumeClaim": {"claimName": "uvp-data"}},
+            {"name": "recordings", "persistentVolumeClaim": {"claimName": "uvp-recordings"}}
+        ]
+
+    if v.get("imagePullSecret"):
+        pod["imagePullSecrets"] = [
+            {"name": v["imagePullSecret"]}
+        ]
+      #-----------
     return {"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": name, "namespace": v["namespace"], "labels": {"app": name}},
             "spec": {"replicas": spec.get("replicas", 1), "selector": {"matchLabels": {"app": name}},
                      "template": {"metadata": {"labels": {"app": name}, "annotations": {"prometheus.io/scrape": "true", "prometheus.io/port": str((ports or [9100])[-1])}},
@@ -206,5 +221,4 @@ if __name__ == "__main__":
         print(f"{len(docs)} manifests OK")
     else:
         print(yaml.safe_dump_all(docs, sort_keys=False))
-if v.get("imagePullSecret"):
-    pod["imagePullSecrets"] = [{"name": v["imagePullSecret"]}]
+
