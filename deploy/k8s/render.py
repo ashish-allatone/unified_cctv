@@ -29,13 +29,24 @@ def env_common(v: dict, extra: dict | None = None) -> list[dict]:
     rtsps = ",".join(f"relay-{i}=rtsp://relay-{i}.relay.{v['namespace']}.svc:8554" for i in range(v["relays"]))
     pbs = ",".join(f"relay-{i}=http://relay-{i}.relay.{v['namespace']}.svc:9996" for i in range(v["relays"]))
     hosts = ",".join(f"relay-{i}={v['publicHost']}" for i in range(v["relays"]))
-    base = {"BUS": "kafka", "KAFKA_BOOTSTRAP": v["kafka_bootstrap"], "ES_URL": v["es_url"], #change
+    base = {"BUS": "kafka", "KAFKA_BOOTSTRAP": v["kafka_bootstrap"], "ES_URL": v["es_url"],
             "API_URL": "http://api:8000", "RELAY_APIS": relays, "RELAY_RTSPS": rtsps, "RELAY_PLAYBACKS": pbs, "RELAY_PUBLIC_HOSTS": hosts,
             "RELAY_PUBLIC_BASE": f"https://{v['publicHost']}/relay", "DATA_DIR": "/data", "RECORDINGS_DIR": "/recordings",
             "OBJECT_STORAGE": "s3", "S3_ENDPOINT": v["object_storage"]["endpoint"], "S3_REGION": v["object_storage"]["region"],
             "S3_BUCKET": v["object_storage"]["bucket"], "S3_PATH_STYLE": "1", "S3_SSE": "AES256", "PII_BLUR_FACES": "1", "METRICS_PORT": "9100"}
     base.update(extra or {})
     env = [{"name": k, "value": str(val)} for k, val in base.items()]
+
+    env.append({
+        "name": "DATABASE_URL",
+        "valueFrom": {
+            "secretKeyRef": {
+                "name": "postgres-secret",
+                "key": "DATABASE_URL"
+            }
+        }
+    })
+
     for secret in ("TOKEN_SECRET", "INTERNAL_SECRET", "RELAY_INTERNAL_PASS", "S3_ACCESS_KEY", "S3_SECRET_KEY", "POLICE_ONVIF_PASS", "MUNI_API_PASS"):
         env.append({"name": secret, "valueFrom": {"secretKeyRef": {"name": "uvp-secrets", "key": secret.lower().replace("_", "-")}}})
     env.append({"name": "RELAY_INTERNAL_USER", "value": "uvp-internal"})
@@ -231,7 +242,7 @@ def render(v: dict) -> list[dict]:
     # PVCs are managed separately through:
     # deploy/k8s/uvp-fss-pv.yaml
     # deploy/k8s/uvp-fss-pvc.yaml
-  
+
   # api
     docs.append(deployment(v, "api", ["python", "-m", "uvicorn", "uvp.services.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"],
                            v["api"], {"METRICS_PORT": "0"}, ports=[8000]))
