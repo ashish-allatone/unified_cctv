@@ -10,33 +10,45 @@ metadata:
   namespace: unified-cctv
 data:
   sources.yaml: "# Departmental sources the platform reads from. One entry per VMS\
-    \ / NVR.\n# Credentials come from environment variables (never commit them).\n\
-    # `cameras:` overrides add location and turn ANPR on for suitable cameras only.\n\
-    sources:\n  - id: police\n    department: Police\n    name: Police Command NVR\
-    \ (ONVIF Profile S)\n    adapter: onvif\n    host: ${POLICE_NVR_HOST:-localhost}\n\
-    \    onvif_port: ${POLICE_ONVIF_PORT:-18080}\n    username_env: POLICE_ONVIF_USER\n\
-    \    password_env: POLICE_ONVIF_PASS\n    max_concurrent_pulls: 8          # agreed\
-    \ cap on simultaneous streams pulled from this NVR\n    cameras:   # heading =\
-    \ degrees clockwise from north, fov = horizontal angle, range_m = useful reach\
-    \ (map coverage)\n      police-cam1: {lat: 19.0760, lon: 72.8777, anpr: true,\
-    \ heading: 45, fov: 60, range_m: 120}\n      police-cam2: {lat: 19.0850, lon:\
-    \ 72.8805, anpr: true, heading: 180, fov: 70, range_m: 150}\n      police-cam3:\
-    \ {lat: 19.0620, lon: 72.8830, heading: 300, fov: 90, range_m: 100}\n      police-cam4:\
-    \ {lat: 19.0720, lon: 72.8950, heading: 90, fov: 60, range_m: 200}\n\n  - id:\
-    \ municipal\n    department: Municipal\n    name: Municipal Corporation VMS (vendor\
-    \ REST API)\n    adapter: vendor_rest\n    base_url: ${MUNI_VMS_URL:-http://localhost:18090}\n\
-    \    username_env: MUNI_API_USER\n    password_env: MUNI_API_PASS\n    max_concurrent_pulls:\
-    \ 8\n    # api:                            # override endpoint/field names for\
-    \ a specific vendor\n    #   cameras_path: /api/v1/cameras\n    #   stream_path:\
-    \ /api/v1/cameras/{id}/live?profile={profile}\n    cameras:\n      muni-cam1:\
-    \ {anpr: true, heading: 135, fov: 75, range_m: 90}\n      muni-cam2: {anpr: true,\
-    \ heading: 250, fov: 80, range_m: 90}\n\n  # Example: a department that only publishes\
-    \ fixed RTSP URLs\n  # - id: traffic\n  #   department: Traffic\n  #   name: Traffic\
-    \ Police ITMS NVR\n  #   adapter: rtsp\n  #   username_env: TRAFFIC_RTSP_USER\n\
-    \  #   password_env: TRAFFIC_RTSP_PASS\n  #   max_concurrent_pulls: 16\n  #  \
-    \ streams:\n  #     - {id: itms-j12, name: \"Junction 12\", main: \"rtsp://10.20.0.12:554/Streaming/Channels/101\"\
-    ,\n  #        sub: \"rtsp://10.20.0.12:554/Streaming/Channels/102\", lat: 19.07,\
-    \ lon: 72.88}\n"
+    \ / NVR.\n# Credentials come from environment variables (.env) - never write them\
+    \ here.\n# Keep the \"sources:\" line at the top: every entry is indented under\
+    \ it.\n# The two simulator departments (police, municipal) were removed. To demo\
+    \ again: docker compose --profile sim up -d\n# and restore their entries from\
+    \ config/sources.example.yaml.\nsources:\n  # Corp8 / Sentinel grid (Gujarat Police\
+    \ Innovation Challenge). The web portal and its cameras.json / HLS\n  # need a\
+    \ browser sign-in with OTP, so the platform uses the RTSP gateway directly: every\
+    \ connection carries the\n  # registered email + access password in the URL (email\
+    \ @ -> %40, done automatically), TCP transport.\n  - id: corp8\n    department:\
+    \ Corp8\n    name: Corp8 Sentinel cameras (challenge grid)\n    adapter: rtsp_template\n\
+    \    host: 103.250.160.189\n    rtsp_port: 8554\n    main: \"rtsp://{host}:{rtsp_port}/stream/cam{channel:02d}\"\
+    \n    username_env: CORP8_USER                  # registered email (.env)\n  \
+    \  password_env: CORP8_PASS                  # access password (.env)\n    max_concurrent_pulls:\
+    \ 10\n    persistent_pull: true\n    channels:                               \
+    \  # names from the Live Grid; cam21-cam30 names to fill in; anpr on plate-facing\
+    \ views\n      - {channel: 1, id: cam01, name: \"Chiman bhai Bridge\", anpr: true}\n\
+    \      - {channel: 2, id: cam02, name: \"Janpath\"}\n      - {channel: 3, id:\
+    \ cam03, name: \"O.N.G.C. Office\"}\n      - {channel: 4, id: cam04, name: \"\
+    Paldi Circle\"}\n      - {channel: 5, id: cam05, name: \"Visat teen Rasta\"}\n\
+    \      - {channel: 6, id: cam06, name: \"Timbavadi gate, Junagadh\", anpr: true}\n\
+    \      - {channel: 7, id: cam07, name: \"Hero showroom, Gir Somnath\"}\n     \
+    \ - {channel: 8, id: cam08, name: \"Majevadi gate, Junagadh\", anpr: true}\n \
+    \     - {channel: 9, id: cam09, name: \"New bypass near BY circle, Junagadh\"\
+    }\n      - {channel: 10, id: cam10, name: \"Char chowk road 2, Junagadh\"}\n \
+    \     - {channel: 11, id: cam11, name: \"Dolatpara, Junagadh\"}\n      - {channel:\
+    \ 12, id: cam12, name: \"Tri Mandir Adalaj Tollnaka\", anpr: true}\n      - {channel:\
+    \ 13, id: cam13, name: \"CN Vidhyalaya\"}\n      - {channel: 14, id: cam14, name:\
+    \ \"Delight RLVD\", anpr: true}\n      - {channel: 15, id: cam15, name: \"Suvidha\
+    \ park\"}\n      - {channel: 16, id: cam16, name: \"Visat P2\"}\n      - {channel:\
+    \ 17, id: cam17, name: \"Rajkot Bus Port CCTV\", anpr: true}\n      - {channel:\
+    \ 18, id: cam18, name: \"Rajkot CCTV\"}\n      - {channel: 19, id: cam19, name:\
+    \ \"Khaparia Gram Panchayat, Gandevi, Navsari\"}\n      - {channel: 20, id: cam20,\
+    \ name: \"Mohanpura\"}\n      - {channel: 21, id: cam21, name: \"CAM21\"}\n  \
+    \    - {channel: 22, id: cam22, name: \"CAM22\"}\n      - {channel: 23, id: cam23,\
+    \ name: \"CAM23\"}\n      - {channel: 24, id: cam24, name: \"CAM24\"}\n      -\
+    \ {channel: 25, id: cam25, name: \"CAM25\"}\n      - {channel: 26, id: cam26,\
+    \ name: \"CAM26\"}\n      - {channel: 27, id: cam27, name: \"CAM27\"}\n      -\
+    \ {channel: 28, id: cam28, name: \"CAM28\"}\n      - {channel: 29, id: cam29,\
+    \ name: \"CAM29\"}\n      - {channel: 30, id: cam30, name: \"CAM30\"}\n"
   users.yaml: "# Pilot users (local provider). Production: enable LDAP/AD or OIDC\
     \ in config/auth.yaml. Hash: python -m uvp.auth <password>\n# Demo passwords:\
     \ admin/admin123 supervisor/super123 police_op/police123 muni_op/muni123 viewer/viewer123\n\
@@ -130,54 +142,34 @@ data:
     \ every plate read by the indexer)\n# and zone analytics (evaluated by the analytics\
     \ worker on sampled frames).\n#\n# Polygons are in normalised frame coordinates\
     \ [x, y] with 0..1 from top-left, so they survive a\n# change of stream resolution.\
-    \ Hours are \"HH:MM-HH:MM\" local (IST) and may wrap midnight.\n\ncameras:\n \
-    \ police-cam1:                       # NH-48 toll lane: traffic flows away from\
-    \ the camera\n    allowed_direction: away          # wrong_way when a vehicle\
-    \ is read moving \"towards\"\n    speed_limit_kmh: 60              # used with\
-    \ `pairs` below\n  police-cam2:                       # Ring Road junction: signal-controlled\n\
-    \    allowed_direction: towards\n    red_light:\n      stop_line_y: 0.62     \
-    \         # vehicles whose bottom edge crosses this line while the signal is red\n\
-    \      signal:                        # one of: roi (detect the red lamp in the\
-    \ picture) | schedule | http\n        mode: roi\n        roi: [0.90, 0.05, 0.98,\
-    \ 0.20]          # x1, y1, x2, y2 of the signal head in the frame\n        # mode:\
-    \ schedule; cycle_s: 90; red_from_s: 0; red_to_s: 40; epoch: \"2026-01-01T00:00:00+05:30\"\
-    \n        # mode: http; url: http://itms.example/api/signal/J12; json_path: state;\
-    \ red_values: [RED, R]\n    no_parking:\n      polygon: [[0.05, 0.55], [0.45,\
-    \ 0.55], [0.45, 0.95], [0.05, 0.95]]\n      min_seconds: 90                # a\
-    \ vehicle stationary inside the polygon for this long\n  muni-cam2:          \
-    \               # bus depot exit: perimeter and crowd\n    intrusion:\n      zones:\n\
-    \        - {name: depot_fence, polygon: [[0.55, 0.20], [0.98, 0.20], [0.98, 0.80],\
-    \ [0.55, 0.80]], hours: \"22:00-05:00\", classes: [person, car, truck, motorcycle]}\n\
-    \    abandoned_object:\n      polygon: [[0.02, 0.40], [0.60, 0.40], [0.60, 0.98],\
-    \ [0.02, 0.98]]\n      min_seconds: 120\n      min_area: 0.002               \
-    \ # fraction of the frame\n    crowd:\n      polygon: [[0.0, 0.3], [1.0, 0.3],\
-    \ [1.0, 1.0], [0.0, 1.0]]\n      max_persons: 20\n\n# Over-speed between two ANPR\
-    \ cameras: time between reads vs road distance.\npairs:\n  - {from: police-cam1,\
-    \ to: police-cam2, distance_m: 1500, limit_kmh: 60, max_minutes: 30}\n  - {from:\
-    \ muni-cam1, to: muni-cam2, distance_m: 900, limit_kmh: 40, max_minutes: 30}\n\
-    \n# Per-camera sampling for zone analytics (frames per second); default ANALYTICS_FPS\n\
-    sampling_fps: 2\n\n# Face search / recognition is NOT enabled. It stays a disabled\
-    \ module until a state-level legal\n# clearance reference (and a DPIA) is recorded\
-    \ here; the API returns 451 until then.\nface_search:\n  enabled: false\n  legal_clearance_ref:\
-    \ \"\"\n"
-  hotlists.yaml: "# External hotlists synchronised into the watchlist by the hotlist\
-    \ service (python -m uvp.services.hotlist_sync).\n# Each source becomes watchlist\
-    \ entries tagged with its name; entries disappear when the source drops them.\n\
-    #\n# Kinds:\n#   csv   file path or http(s) URL of a CSV with columns: plate,\
-    \ reason, priority, expires (ISO date, optional)\n#   json  http(s) endpoint returning\
-    \ {\"vehicles\": [{\"plate\": \"...\", \"reason\": \"...\", \"priority\": \"high\"\
-    , \"expires\": \"2026-12-31\"}]}\n#         (json_path / field names configurable).\
-    \ Auth: header name + env var holding the value.\n#   vahan  NCRB / Vahan style\
-    \ feed: same as json with the documented contract in docs/analytics.md (stolen-vehicle\
-    \ list).\n#\n# Real Vahan / NCRB / state e-challan feeds need credentials issued\
-    \ by those authorities; the simulator\n# (simulators/sim_hotlist.py) serves the\
-    \ same contract for the pilot.\nsources:\n  - name: stolen_vehicles_demo\n   \
-    \ kind: json\n    url: ${HOTLIST_URL:-http://localhost:18095/hotlist/stolen}\n\
-    \    interval_minutes: 15\n    json_path: vehicles\n    fields: {plate: plate,\
-    \ reason: reason, priority: priority, expires: expires}\n    auth_header: X-API-Key\n\
-    \    auth_env: HOTLIST_API_KEY\n    default_priority: high\n    default_days:\
-    \ 30\n  # - name: state_wanted_csv\n  #   kind: csv\n  #   url: /data/hotlists/wanted.csv\
-    \          # or https://\u2026\n  #   interval_minutes: 60\n"
+    \ Hours are \"HH:MM-HH:MM\" local (IST) and may wrap midnight.\n#\n# Wide junction\
+    \ cameras (a whole crossing in one frame) cannot read plates, but they count well:\n\
+    #   tiles: 2        run the vehicle detector on 2x2 overlapping tiles as well\
+    \ as the whole frame (3-5x more\n#                   small vehicles found on a\
+    \ 1080p overview; costs ~5x CPU per frame, fine at 1-2 fps)\n#   traffic:    \
+    \    vehicles in view by type per minute, peak, and (with `line`) how many crossed\
+    \ a line\n#                   in each direction. Results: Violations tab -> Traffic,\
+    \ /api/traffic.\n\ncameras:\n  cam01:                             # Chiman bhai\
+    \ Bridge: wide overview, too far for plates -> counting\n    tiles: 2\n    traffic:\n\
+    \      window_s: 60\n      line: [[0.30, 0.62], [0.72, 0.62]]      # count line\
+    \ across the carriageway (fractions of the frame)\n  cam02:                  \
+    \           # Janpath: junction overview\n    tiles: 2\n    traffic: {window_s:\
+    \ 60}\n    crowd:\n      polygon: [[0.0, 0.35], [1.0, 0.35], [1.0, 1.0], [0.0,\
+    \ 1.0]]\n      max_persons: 25\n  cam12:                             # Adalaj\
+    \ toll naka: vehicles come towards the camera, plates readable\n    allowed_direction:\
+    \ towards\n    tiles: 2\n    traffic: {window_s: 60}\n  cam14:               \
+    \              # Delight RLVD: red-light camera; configure the signal head once\
+    \ seen\n    allowed_direction: towards\n    # red_light:\n    #   stop_line_y:\
+    \ 0.70\n    #   signal: {mode: roi, roi: [0.90, 0.05, 0.98, 0.20]}\n  cam17: \
+    \                            # Rajkot Bus Port: counting + no-parking in front\
+    \ of the gate\n    tiles: 2\n    traffic: {window_s: 60}\n\npairs: []        \
+    \                    # add {from, to, distance_m, limit_kmh, max_minutes} for\
+    \ over-speed between two ANPR cameras\n\nsampling_fps: 1.5                   \
+    \ # frames per second per analytics camera (tiles cost ~5x per frame)\n\nface_search:\n\
+    \  enabled: false\n  legal_clearance_ref: \"\"\n"
+  hotlists.yaml: 'sources: []
+
+    '
   notify.yaml: "# Notification channels and routing. Secrets via ${ENV}. Every attempt\
     \ is logged (Admin \u2192 Notifications).\n#\n# Channel types:\n#   email    \
     \ SMTP (host, port, tls, user, password, from)\n#   sms       any HTTP SMS gateway:\
@@ -335,30 +327,19 @@ data:
     \ 10s\n"
 ---
 apiVersion: v1
-kind: PersistentVolumeClaim
+kind: Secret
 metadata:
-  name: uvp-data
+  name: uvp-secrets
   namespace: unified-cctv
-spec:
-  accessModes:
-  - ReadWriteMany
-  storageClassName: standard
-  resources:
-    requests:
-      storage: 50Gi
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: uvp-recordings
-  namespace: unified-cctv
-spec:
-  accessModes:
-  - ReadWriteMany
-  storageClassName: standard
-  resources:
-    requests:
-      storage: 400Gi
+type: Opaque
+stringData:
+  token-secret: CHANGE-ME
+  internal-secret: CHANGE-ME
+  relay-internal-pass: CHANGE-ME
+  s3-access-key: CHANGE-ME
+  s3-secret-key: CHANGE-ME
+  police-onvif-pass: CHANGE-ME
+  muni-api-pass: CHANGE-ME
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -382,7 +363,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-api:1.7.2
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
         command:
         - python
         - -m
@@ -395,8 +376,6 @@ spec:
         - --workers
         - '2'
         env:
-        - name: DATABASE_URL
-          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
@@ -435,6 +414,11 @@ spec:
           value: '1'
         - name: METRICS_PORT
           value: '0'
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
         - name: TOKEN_SECRET
           valueFrom:
             secretKeyRef:
@@ -472,25 +456,6 @@ spec:
               key: muni-api-pass
         - name: RELAY_INTERNAL_USER
           value: uvp-internal
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8000
-          initialDelaySeconds: 20
-          periodSeconds: 15
-        readinessProbe:
-          httpGet:
-            path: /readyz
-            port: 8000
-          initialDelaySeconds: 10
-          periodSeconds: 10
-          failureThreshold: 3
-        startupProbe:
-          httpGet:
-            path: /healthz
-            port: 8000
-          periodSeconds: 5
-          failureThreshold: 36
         resources:
           requests:
             cpu: 500m
@@ -576,14 +541,12 @@ spec:
     spec:
       containers:
       - name: adapters
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-adapters:1.7.2
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
         command:
         - python
         - -m
         - uvp.services.adapter_service
         env:
-        - name: DATABASE_URL
-          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
@@ -622,6 +585,11 @@ spec:
           value: '1'
         - name: METRICS_PORT
           value: '9100'
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
         - name: TOKEN_SECRET
           valueFrom:
             secretKeyRef:
@@ -659,24 +627,12 @@ spec:
               key: muni-api-pass
         - name: RELAY_INTERNAL_USER
           value: uvp-internal
-        livenessProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          initialDelaySeconds: 30
-          periodSeconds: 30
-        startupProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          periodSeconds: 10
-          failureThreshold: 30
         resources:
           requests:
-            cpu: 500m
+            cpu: 250m
             memory: 512Mi
           limits:
-            cpu: 500m
+            cpu: 250m
             memory: 512Mi
         ports:
         - containerPort: 9100
@@ -724,14 +680,12 @@ spec:
     spec:
       containers:
       - name: indexer
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-indexer:1.7.2
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
         command:
         - python
         - -m
         - uvp.services.indexer
         env:
-        - name: DATABASE_URL
-          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
@@ -770,6 +724,11 @@ spec:
           value: '1'
         - name: METRICS_PORT
           value: '9100'
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
         - name: TOKEN_SECRET
           valueFrom:
             secretKeyRef:
@@ -807,25 +766,13 @@ spec:
               key: muni-api-pass
         - name: RELAY_INTERNAL_USER
           value: uvp-internal
-        livenessProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          initialDelaySeconds: 30
-          periodSeconds: 30
-        startupProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          periodSeconds: 10
-          failureThreshold: 30
         resources:
           requests:
-            cpu: 500m
-            memory: 1Gi
+            cpu: 250m
+            memory: 512Mi
           limits:
-            cpu: 500m
-            memory: 1Gi
+            cpu: 250m
+            memory: 512Mi
         ports:
         - containerPort: 9100
         volumeMounts:
@@ -872,14 +819,12 @@ spec:
     spec:
       containers:
       - name: archiver
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-archiver:1.7.2
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
         command:
         - python
         - -m
         - uvp.services.archiver
         env:
-        - name: DATABASE_URL
-          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
@@ -918,6 +863,11 @@ spec:
           value: '1'
         - name: METRICS_PORT
           value: '9100'
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
         - name: TOKEN_SECRET
           valueFrom:
             secretKeyRef:
@@ -955,25 +905,13 @@ spec:
               key: muni-api-pass
         - name: RELAY_INTERNAL_USER
           value: uvp-internal
-        livenessProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          initialDelaySeconds: 30
-          periodSeconds: 30
-        startupProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          periodSeconds: 10
-          failureThreshold: 30
         resources:
           requests:
-            cpu: 500m
-            memory: 1Gi
+            cpu: 250m
+            memory: 512Mi
           limits:
-            cpu: 500m
-            memory: 1Gi
+            cpu: 250m
+            memory: 512Mi
         ports:
         - containerPort: 9100
         volumeMounts:
@@ -1020,14 +958,12 @@ spec:
     spec:
       containers:
       - name: analytics
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-analytics:1.7.2
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
         command:
         - python
         - -m
         - uvp.services.analytics_worker
         env:
-        - name: DATABASE_URL
-          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
@@ -1066,154 +1002,11 @@ spec:
           value: '1'
         - name: METRICS_PORT
           value: '9100'
-        - name: TOKEN_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: uvp-secrets
-              key: token-secret
-        - name: INTERNAL_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: uvp-secrets
-              key: internal-secret
-        - name: RELAY_INTERNAL_PASS
-          valueFrom:
-            secretKeyRef:
-              name: uvp-secrets
-              key: relay-internal-pass
-        - name: S3_ACCESS_KEY
-          valueFrom:
-            secretKeyRef:
-              name: uvp-secrets
-              key: s3-access-key
-        - name: S3_SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: uvp-secrets
-              key: s3-secret-key
-        - name: POLICE_ONVIF_PASS
-          valueFrom:
-            secretKeyRef:
-              name: uvp-secrets
-              key: police-onvif-pass
-        - name: MUNI_API_PASS
-          valueFrom:
-            secretKeyRef:
-              name: uvp-secrets
-              key: muni-api-pass
-        - name: RELAY_INTERNAL_USER
-          value: uvp-internal
-        livenessProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          initialDelaySeconds: 30
-          periodSeconds: 30
-        startupProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          periodSeconds: 10
-          failureThreshold: 30
-        resources:
-          requests:
-            cpu: '1'
-            memory: 2Gi
-          limits:
-            cpu: '1'
-            memory: 2Gi
-        ports:
-        - containerPort: 9100
-        volumeMounts:
-        - name: config
-          mountPath: /app/config
-          readOnly: true
-        - name: data
-          mountPath: /data
-        - name: recordings
-          mountPath: /recordings
-          readOnly: true
-      volumes:
-      - name: config
-        configMap:
-          name: uvp-config
-      - name: data
-        persistentVolumeClaim:
-          claimName: uvp-data
-      - name: recordings
-        persistentVolumeClaim:
-          claimName: uvp-recordings
-      imagePullSecrets:
-      - name: ocir-pull
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: faces
-  namespace: unified-cctv
-  labels:
-    app: faces
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: faces
-  template:
-    metadata:
-      labels:
-        app: faces
-      annotations:
-        prometheus.io/scrape: 'true'
-        prometheus.io/port: '9100'
-    spec:
-      containers:
-      - name: faces
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-faces:1.7.2
-        command:
-        - python
-        - -m
-        - uvp.services.face_worker
-        env:
         - name: DATABASE_URL
-          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
-        - name: BUS
-          value: kafka
-        - name: KAFKA_BOOTSTRAP
-          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
-        - name: ES_URL
-          value: http://elasticsearch.search.svc:9200
-        - name: API_URL
-          value: http://api:8000
-        - name: RELAY_APIS
-          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
-        - name: RELAY_RTSPS
-          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
-        - name: RELAY_PLAYBACKS
-          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
-        - name: RELAY_PUBLIC_HOSTS
-          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
-        - name: RELAY_PUBLIC_BASE
-          value: https://cctv.example.gov.in/relay
-        - name: DATA_DIR
-          value: /data
-        - name: RECORDINGS_DIR
-          value: /recordings
-        - name: OBJECT_STORAGE
-          value: s3
-        - name: S3_ENDPOINT
-          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
-        - name: S3_REGION
-          value: ap-mumbai-1
-        - name: S3_BUCKET
-          value: uvp-video
-        - name: S3_PATH_STYLE
-          value: '1'
-        - name: S3_SSE
-          value: AES256
-        - name: PII_BLUR_FACES
-          value: '1'
-        - name: METRICS_PORT
-          value: '9100'
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
         - name: TOKEN_SECRET
           valueFrom:
             secretKeyRef:
@@ -1251,18 +1044,6 @@ spec:
               key: muni-api-pass
         - name: RELAY_INTERNAL_USER
           value: uvp-internal
-        livenessProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          initialDelaySeconds: 30
-          periodSeconds: 30
-        startupProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          periodSeconds: 10
-          failureThreshold: 30
         resources:
           requests:
             cpu: '1'
@@ -1316,14 +1097,12 @@ spec:
     spec:
       containers:
       - name: hotlist
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-hotlist:1.7.2
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
         command:
         - python
         - -m
         - uvp.services.hotlist_sync
         env:
-        - name: DATABASE_URL
-          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
@@ -1362,6 +1141,11 @@ spec:
           value: '1'
         - name: METRICS_PORT
           value: '9100'
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
         - name: TOKEN_SECRET
           valueFrom:
             secretKeyRef:
@@ -1399,25 +1183,13 @@ spec:
               key: muni-api-pass
         - name: RELAY_INTERNAL_USER
           value: uvp-internal
-        livenessProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          initialDelaySeconds: 30
-          periodSeconds: 30
-        startupProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          periodSeconds: 10
-          failureThreshold: 30
         resources:
           requests:
             cpu: 250m
-            memory: 256Mi
+            memory: 512Mi
           limits:
             cpu: 250m
-            memory: 256Mi
+            memory: 512Mi
         ports:
         - containerPort: 9100
         volumeMounts:
@@ -1464,14 +1236,12 @@ spec:
     spec:
       containers:
       - name: anpr
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-anpr:1.7.2
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:29
         command:
         - sh
         - -c
         - export ANPR_SHARD=${HOSTNAME##*-}/2; exec python -m uvp.services.anpr_worker
         env:
-        - name: DATABASE_URL
-          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
@@ -1510,6 +1280,11 @@ spec:
           value: '1'
         - name: METRICS_PORT
           value: '9100'
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
         - name: TOKEN_SECRET
           valueFrom:
             secretKeyRef:
@@ -1547,18 +1322,6 @@ spec:
               key: muni-api-pass
         - name: RELAY_INTERNAL_USER
           value: uvp-internal
-        livenessProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          initialDelaySeconds: 30
-          periodSeconds: 30
-        startupProbe:
-          httpGet:
-            path: /metrics
-            port: 9100
-          periodSeconds: 10
-          failureThreshold: 30
         resources:
           requests:
             cpu: '2'
@@ -1619,22 +1382,9 @@ spec:
       labels:
         app: relay
     spec:
-      imagePullSecrets:
-      - name: ocir-pull
       containers:
       - name: mediamtx
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-relay:1.7.2
-        livenessProbe:
-          httpGet:
-            path: /v3/paths/list
-            port: 9997
-          initialDelaySeconds: 15
-          periodSeconds: 20
-        readinessProbe:
-          httpGet:
-            path: /v3/paths/list
-            port: 9997
-          periodSeconds: 10
+        image: docker.io/bluenviron/mediamtx:1.15.1-ffmpeg
         env:
         - name: MTX_AUTHHTTPADDRESS
           value: http://api:8000/internal/relay-auth
@@ -1684,6 +1434,8 @@ spec:
       - name: recordings
         persistentVolumeClaim:
           claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
 ---
 apiVersion: v1
 kind: Service
@@ -1747,24 +1499,6 @@ spec:
             port:
               number: 8000
 ---
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: indexer
-  namespace: unified-cctv
-spec:
-  scaleTargetRef:
-    name: indexer
-  minReplicaCount: 2
-  maxReplicaCount: 8
-  triggers:
-  - type: kafka
-    metadata:
-      bootstrapServers: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
-      consumerGroup: uvp-indexer
-      topic: anpr.events
-      lagThreshold: '500'
----
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
@@ -1775,4 +1509,3 @@ spec:
   selector:
     matchLabels:
       app: api
-
