@@ -10,7 +10,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: unified-cctv-fss-data
   mountOptions:
-    - nfsvers=4.1
+    - nfsvers=3
   csi:
     driver: fss.csi.oraclecloud.com
     volumeHandle: ocid1.filesystem.oc1.ap_mumbai_1.aaaaaaaaaapok62ymjxw2llqojxwiotboaww25lnmjqwsljrfvqwiljr:10.0.1.140:/uvp-data
@@ -27,7 +27,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: unified-cctv-fss-recordings
   mountOptions:
-    - nfsvers=4.1
+    - nfsvers=3
   csi:
     driver: fss.csi.oraclecloud.com
     volumeHandle: ocid1.filesystem.oc1.ap_mumbai_1.aaaaaaaaaapok62ymjxw2llqojxwiotboaww25lnmjqwsljrfvqwiljr:10.0.1.140:/uvp-recordings
