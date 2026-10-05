@@ -1,0 +1,1778 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: unified-cctv
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: uvp-config
+  namespace: unified-cctv
+data:
+  sources.yaml: "# Departmental sources the platform reads from. One entry per VMS\
+    \ / NVR.\n# Credentials come from environment variables (never commit them).\n\
+    # `cameras:` overrides add location and turn ANPR on for suitable cameras only.\n\
+    sources:\n  - id: police\n    department: Police\n    name: Police Command NVR\
+    \ (ONVIF Profile S)\n    adapter: onvif\n    host: ${POLICE_NVR_HOST:-localhost}\n\
+    \    onvif_port: ${POLICE_ONVIF_PORT:-18080}\n    username_env: POLICE_ONVIF_USER\n\
+    \    password_env: POLICE_ONVIF_PASS\n    max_concurrent_pulls: 8          # agreed\
+    \ cap on simultaneous streams pulled from this NVR\n    cameras:   # heading =\
+    \ degrees clockwise from north, fov = horizontal angle, range_m = useful reach\
+    \ (map coverage)\n      police-cam1: {lat: 19.0760, lon: 72.8777, anpr: true,\
+    \ heading: 45, fov: 60, range_m: 120}\n      police-cam2: {lat: 19.0850, lon:\
+    \ 72.8805, anpr: true, heading: 180, fov: 70, range_m: 150}\n      police-cam3:\
+    \ {lat: 19.0620, lon: 72.8830, heading: 300, fov: 90, range_m: 100}\n      police-cam4:\
+    \ {lat: 19.0720, lon: 72.8950, heading: 90, fov: 60, range_m: 200}\n\n  - id:\
+    \ municipal\n    department: Municipal\n    name: Municipal Corporation VMS (vendor\
+    \ REST API)\n    adapter: vendor_rest\n    base_url: ${MUNI_VMS_URL:-http://localhost:18090}\n\
+    \    username_env: MUNI_API_USER\n    password_env: MUNI_API_PASS\n    max_concurrent_pulls:\
+    \ 8\n    # api:                            # override endpoint/field names for\
+    \ a specific vendor\n    #   cameras_path: /api/v1/cameras\n    #   stream_path:\
+    \ /api/v1/cameras/{id}/live?profile={profile}\n    cameras:\n      muni-cam1:\
+    \ {anpr: true, heading: 135, fov: 75, range_m: 90}\n      muni-cam2: {anpr: true,\
+    \ heading: 250, fov: 80, range_m: 90}\n\n  # Example: a department that only publishes\
+    \ fixed RTSP URLs\n  # - id: traffic\n  #   department: Traffic\n  #   name: Traffic\
+    \ Police ITMS NVR\n  #   adapter: rtsp\n  #   username_env: TRAFFIC_RTSP_USER\n\
+    \  #   password_env: TRAFFIC_RTSP_PASS\n  #   max_concurrent_pulls: 16\n  #  \
+    \ streams:\n  #     - {id: itms-j12, name: \"Junction 12\", main: \"rtsp://10.20.0.12:554/Streaming/Channels/101\"\
+    ,\n  #        sub: \"rtsp://10.20.0.12:554/Streaming/Channels/102\", lat: 19.07,\
+    \ lon: 72.88}\n"
+  users.yaml: "# Pilot users (local provider). Production: enable LDAP/AD or OIDC\
+    \ in config/auth.yaml. Hash: python -m uvp.auth <password>\n# Demo passwords:\
+    \ admin/admin123 supervisor/super123 police_op/police123 muni_op/muni123 viewer/viewer123\n\
+    users:\n  - username: admin\n    role: admin\n    departments: [\"*\"]\n    password_hash:\
+    \ \"pbkdf2$4092307e751b30de$f4a84c96d4c6e5b88a6dbf81aecde0f5265e70b0dbacf5d993c6b84de56b8264\"\
+    \n  - username: supervisor\n    role: supervisor\n    departments: [\"*\"]\n \
+    \   password_hash: \"pbkdf2$50a2772ac9a3963d$3c36c41812bf08ddbce25f79e1b55677a5c195994fb90fb79869b83160c5ac74\"\
+    \n  - username: police_op\n    role: analyst\n    departments: [\"Police\"]\n\
+    \    password_hash: \"pbkdf2$5d788d22dc104aec$0a556c5ba639c0e4673462dcd67e038bb283f0b07800e61025f1fe34bd02fcdd\"\
+    \n  - username: muni_op\n    role: analyst\n    departments: [\"Municipal\"]\n\
+    \    password_hash: \"pbkdf2$73a5efcfc91ce725$49e1cc711ea208b29e0539f913180889c4cc41f13fa9189bd076f845f1927f8d\"\
+    \n  - username: viewer\n    role: viewer\n    departments: [\"*\"]\n    password_hash:\
+    \ \"pbkdf2$51c72a48886402ad$6ae2f902f3952db2c577568f0c2ad5ef91df7c000f91548de0f15080bc9fc021\"\
+    \n"
+  rules.yaml: "# Automatic event-tagging rules applied by the indexer.\nutc_offset_minutes:\
+    \ 330          # IST, used for time-of-day rules\nlow_confidence_below: 0.80 \
+    \      # tag reads below this mean character confidence\nfuzzy_watchlist_match:\
+    \ true      # alert on watchlist plates that differ by one OCR character (match=\"\
+    fuzzy\")\nrestricted_hours:\n  - camera: muni-cam2            # Bus Depot Exit:\
+    \ private vehicles not expected at night\n    from: \"23:00\"\n    to: \"05:00\"\
+    \n    tag: after_hours_depot\n  - camera: \"*\"\n    from: \"01:00\"\n    to:\
+    \ \"04:00\"\n    tag: night_movement\n\n# Non-standard plates (decorative fonts,\
+    \ stickers/emoji, hidden characters -> plate ends in \"????\"):\n# CMVR Rule 50/51\
+    \ require an HSRP plate in the prescribed font with no decorations.\n# Penalty:\
+    \ Motor Vehicles Act s.177 (general offence). Amounts are the 2019-amendment defaults;\n\
+    # confirm the current state notification with the traffic department before issuing.\n\
+    non_standard_plate:\n  challan: true\n  section: \"MV Act s.177 r/w CMVR Rule\
+    \ 50/51\"\n  fine_first_inr: 500\n  fine_repeat_inr: 1500\n  priority: medium\n\
+    \n# Video archive retention (object storage), in days, per department. Applied\
+    \ hourly by the archiver.\n#   recordings = continuous segments of recorded cameras,\
+    \ clips = per-event clips, crops = plate/frame images\n# events = plate-read metadata\
+    \ rows; audit = audit log (never below 180 days: CERT-In directions, 2022)\nretention:\n\
+    \  default: {recordings_days: 30, clips_days: 90, crops_days: 90, events_days:\
+    \ 365, audit_days: 365}\n  Police:  {recordings_days: 60}\n\n# Offence schedule\
+    \ for challan drafts. Sections per the Motor Vehicles Act 1988 as amended in 2019;\n\
+    # amounts are the central defaults and MUST be confirmed against the state notification\
+    \ with the\n# traffic department before anything is issued. `repeat_inr` applies\
+    \ when the plate already has an\n# approved challan for the same offence.\noffences:\n\
+    \  non_standard_plate: {section: \"s.177 r/w CMVR Rule 50/51\", fine_inr: 500,\
+    \ repeat_inr: 1500, priority: medium, challan: true}\n  over_speed:         {section:\
+    \ \"s.183(1)\", fine_inr: 1000, repeat_inr: 2000, priority: high, challan: true}\n\
+    \  wrong_way:          {section: \"s.184 (dangerous driving)\", fine_inr: 1000,\
+    \ repeat_inr: 5000, priority: high, challan: true}\n  red_light:          {section:\
+    \ \"s.184 / s.177\", fine_inr: 1000, repeat_inr: 5000, priority: high, challan:\
+    \ true}\n  no_helmet:          {section: \"s.194D\", fine_inr: 1000, repeat_inr:\
+    \ 1000, priority: medium, challan: true, note: \"plus 3 months licence disqualification\"\
+    }\n  triple_riding:      {section: \"s.194C\", fine_inr: 1000, repeat_inr: 1000,\
+    \ priority: medium, challan: true, note: \"plus 3 months licence disqualification\"\
+    }\n  illegal_parking:    {section: \"s.177 / s.122\", fine_inr: 500, repeat_inr:\
+    \ 1500, priority: low, challan: true}\n"
+  auth.yaml: "# Identity, MFA and access policy. Secrets come from environment variables\
+    \ (${VAR}).\n#\n# Providers are tried in order for a username/password login:\
+    \ local users.yaml first, then LDAP.\n# OIDC (Azure AD / ADFS / Keycloak / any\
+    \ OpenID Connect IdP; SAML-only IdPs are fronted by Keycloak)\n# is a browser\
+    \ redirect flow started from the login page's \"Sign in with <name>\" button.\n\
+    \nproviders:\n  local:\n    enabled: true                       # config/users.yaml\n\
+    \n  ldap:\n    enabled: false\n    server: ldaps://dc01.police.gov.in:636    \
+    \   # ldap:// or ldaps://\n    tls_verify: true\n    # How to bind as the user\
+    \ who is logging in. Active Directory accepts user@domain;\n    # OpenLDAP usually\
+    \ needs a DN template.\n    bind_template: \"{username}@police.gov.in\"    # or\
+    \ \"uid={username},ou=people,dc=example,dc=in\"\n    # Where to read the user's\
+    \ groups after a successful bind\n    base_dn: \"DC=police,DC=gov,DC=in\"\n  \
+    \  user_filter: \"(sAMAccountName={username})\"   # OpenLDAP: \"(uid={username})\"\
+    \n    group_attr: memberOf\n    # AD/LDAP group -> platform role + departments.\
+    \ First match wins; users in no listed group are refused.\n    group_map:\n  \
+    \    \"CN=CCTV-Admins,OU=Groups,DC=police,DC=gov,DC=in\":      {role: admin, departments:\
+    \ [\"*\"]}\n      \"CN=CCTV-Supervisors,OU=Groups,DC=police,DC=gov,DC=in\": {role:\
+    \ supervisor, departments: [\"Police\"]}\n      \"CN=CCTV-Operators,OU=Groups,DC=police,DC=gov,DC=in\"\
+    :   {role: analyst, departments: [\"Police\"]}\n      \"CN=CCTV-Viewers,OU=Groups,DC=police,DC=gov,DC=in\"\
+    :     {role: viewer, departments: [\"Police\"]}\n\n  oidc:\n    enabled: false\n\
+    \    name: \"State SSO\"\n    issuer: https://login.microsoftonline.com/<tenant-id>/v2.0\
+    \     # discovery at <issuer>/.well-known/openid-configuration\n    client_id:\
+    \ ${OIDC_CLIENT_ID:-}\n    client_secret: ${OIDC_CLIENT_SECRET:-}\n    redirect_uri:\
+    \ https://cctv.example.gov.in/api/auth/oidc/callback\n    scopes: [openid, profile,\
+    \ email]\n    username_claim: preferred_username\n    groups_claim: groups   \
+    \              # or \"roles\" for Azure app roles\n    group_map:            \
+    \               # same shape as ldap.group_map\n      \"cctv-admins\":     {role:\
+    \ admin, departments: [\"*\"]}\n      \"cctv-operators\":  {role: analyst, departments:\
+    \ [\"Police\"]}\n    # IdP-side MFA (Conditional Access etc.) is accepted as MFA\
+    \ when the token carries amr containing \"mfa\"\n    trust_idp_mfa: true\n\nmfa:\n\
+    \  # Roles that must have TOTP enrolled (Google/Microsoft Authenticator). Others\
+    \ may enrol voluntarily.\n  # Pilot default is empty so demo logins stay one-step;\
+    \ production: [admin, supervisor]\n  required_roles: []\n  issuer_name: \"Unified\
+    \ CCTV\"\n  grace_logins: 3        # logins allowed before enrolment is enforced\
+    \ for a required role\n\nbreak_glass:\n  enabled: true\n  roles: [supervisor,\
+    \ admin]         # who may invoke it\n  ttl_minutes: 60\n  grants: {departments:\
+    \ [\"*\"], features: [live, playback, export, plate_search, movement]}\n  notify_roles:\
+    \ [admin]              # get a live alert when it is used\n\nsession:\n  ttl_hours:\
+    \ 12\n  idle_minutes: 60\n"
+  analytics.yaml: "# Analytics beyond ANPR. Per-camera traffic rules (evaluated on\
+    \ every plate read by the indexer)\n# and zone analytics (evaluated by the analytics\
+    \ worker on sampled frames).\n#\n# Polygons are in normalised frame coordinates\
+    \ [x, y] with 0..1 from top-left, so they survive a\n# change of stream resolution.\
+    \ Hours are \"HH:MM-HH:MM\" local (IST) and may wrap midnight.\n\ncameras:\n \
+    \ police-cam1:                       # NH-48 toll lane: traffic flows away from\
+    \ the camera\n    allowed_direction: away          # wrong_way when a vehicle\
+    \ is read moving \"towards\"\n    speed_limit_kmh: 60              # used with\
+    \ `pairs` below\n  police-cam2:                       # Ring Road junction: signal-controlled\n\
+    \    allowed_direction: towards\n    red_light:\n      stop_line_y: 0.62     \
+    \         # vehicles whose bottom edge crosses this line while the signal is red\n\
+    \      signal:                        # one of: roi (detect the red lamp in the\
+    \ picture) | schedule | http\n        mode: roi\n        roi: [0.90, 0.05, 0.98,\
+    \ 0.20]          # x1, y1, x2, y2 of the signal head in the frame\n        # mode:\
+    \ schedule; cycle_s: 90; red_from_s: 0; red_to_s: 40; epoch: \"2026-01-01T00:00:00+05:30\"\
+    \n        # mode: http; url: http://itms.example/api/signal/J12; json_path: state;\
+    \ red_values: [RED, R]\n    no_parking:\n      polygon: [[0.05, 0.55], [0.45,\
+    \ 0.55], [0.45, 0.95], [0.05, 0.95]]\n      min_seconds: 90                # a\
+    \ vehicle stationary inside the polygon for this long\n  muni-cam2:          \
+    \               # bus depot exit: perimeter and crowd\n    intrusion:\n      zones:\n\
+    \        - {name: depot_fence, polygon: [[0.55, 0.20], [0.98, 0.20], [0.98, 0.80],\
+    \ [0.55, 0.80]], hours: \"22:00-05:00\", classes: [person, car, truck, motorcycle]}\n\
+    \    abandoned_object:\n      polygon: [[0.02, 0.40], [0.60, 0.40], [0.60, 0.98],\
+    \ [0.02, 0.98]]\n      min_seconds: 120\n      min_area: 0.002               \
+    \ # fraction of the frame\n    crowd:\n      polygon: [[0.0, 0.3], [1.0, 0.3],\
+    \ [1.0, 1.0], [0.0, 1.0]]\n      max_persons: 20\n\n# Over-speed between two ANPR\
+    \ cameras: time between reads vs road distance.\npairs:\n  - {from: police-cam1,\
+    \ to: police-cam2, distance_m: 1500, limit_kmh: 60, max_minutes: 30}\n  - {from:\
+    \ muni-cam1, to: muni-cam2, distance_m: 900, limit_kmh: 40, max_minutes: 30}\n\
+    \n# Per-camera sampling for zone analytics (frames per second); default ANALYTICS_FPS\n\
+    sampling_fps: 2\n\n# Face search / recognition is NOT enabled. It stays a disabled\
+    \ module until a state-level legal\n# clearance reference (and a DPIA) is recorded\
+    \ here; the API returns 451 until then.\nface_search:\n  enabled: false\n  legal_clearance_ref:\
+    \ \"\"\n"
+  hotlists.yaml: "# External hotlists synchronised into the watchlist by the hotlist\
+    \ service (python -m uvp.services.hotlist_sync).\n# Each source becomes watchlist\
+    \ entries tagged with its name; entries disappear when the source drops them.\n\
+    #\n# Kinds:\n#   csv   file path or http(s) URL of a CSV with columns: plate,\
+    \ reason, priority, expires (ISO date, optional)\n#   json  http(s) endpoint returning\
+    \ {\"vehicles\": [{\"plate\": \"...\", \"reason\": \"...\", \"priority\": \"high\"\
+    , \"expires\": \"2026-12-31\"}]}\n#         (json_path / field names configurable).\
+    \ Auth: header name + env var holding the value.\n#   vahan  NCRB / Vahan style\
+    \ feed: same as json with the documented contract in docs/analytics.md (stolen-vehicle\
+    \ list).\n#\n# Real Vahan / NCRB / state e-challan feeds need credentials issued\
+    \ by those authorities; the simulator\n# (simulators/sim_hotlist.py) serves the\
+    \ same contract for the pilot.\nsources:\n  - name: stolen_vehicles_demo\n   \
+    \ kind: json\n    url: ${HOTLIST_URL:-http://localhost:18095/hotlist/stolen}\n\
+    \    interval_minutes: 15\n    json_path: vehicles\n    fields: {plate: plate,\
+    \ reason: reason, priority: priority, expires: expires}\n    auth_header: X-API-Key\n\
+    \    auth_env: HOTLIST_API_KEY\n    default_priority: high\n    default_days:\
+    \ 30\n  # - name: state_wanted_csv\n  #   kind: csv\n  #   url: /data/hotlists/wanted.csv\
+    \          # or https://\u2026\n  #   interval_minutes: 60\n"
+  notify.yaml: "# Notification channels and routing. Secrets via ${ENV}. Every attempt\
+    \ is logged (Admin \u2192 Notifications).\n#\n# Channel types:\n#   email    \
+    \ SMTP (host, port, tls, user, password, from)\n#   sms       any HTTP SMS gateway:\
+    \ url, method, headers, body template with {to} and {text}\n#             (works\
+    \ with Twilio-compatible and Indian DLT gateways that accept JSON)\n#   whatsapp\
+    \  same shape; example below is the WhatsApp Cloud API text message\n#   webhook\
+    \   signed JSON POST (X-UVP-Signature = HMAC-SHA256 of the body) - e.g. Dial-112\
+    \ / CAD intake\n#   voice     automated phone call through a BulkOBD-compatible\
+    \ outbound dialer (POST <url>/voiceBlast):\n#             url (base URL of the\
+    \ dialer), username/password (dialer account), language (\"1\"), max_call_s,\n\
+    #             ack_digit (\"1\" = the call asks to press 1; the dialer's result\
+    \ webhook then acknowledges the alert),\n#             sound_id (play a pre-recorded\
+    \ clip uploaded on the dialer panel instead of text-to-speech),\n#           \
+    \  caller_id, retries, retry_after. Result webhook: <server>/api/integrations/voice/callback?key=${VOICE_CALLBACK_KEY}\n\
+    channels:\n  control_room_email:\n    type: email\n    enabled: false\n    host:\
+    \ smtp.example.gov.in\n    port: 587\n    tls: true\n    user: ${SMTP_USER:-}\n\
+    \    password: ${SMTP_PASS:-}\n    from: cctv-alerts@example.gov.in\n  sms_gateway:\n\
+    \    type: sms\n    enabled: false\n    url: https://sms.example.in/api/send\n\
+    \    method: POST\n    headers: {Authorization: \"Bearer ${SMS_API_KEY:-}\"}\n\
+    \    body: {sender: \"CCTVPL\", to: \"{to}\", message: \"{text}\"}\n  whatsapp_cloud:\n\
+    \    type: whatsapp\n    enabled: false\n    url: https://graph.facebook.com/v19.0/${WA_PHONE_ID:-0}/messages\n\
+    \    headers: {Authorization: \"Bearer ${WA_TOKEN:-}\"}\n    body: {messaging_product:\
+    \ whatsapp, to: \"{to}\", type: text, text: {body: \"{text}\"}}\n  voice_call:\n\
+    \    type: voice\n    enabled: false\n    url: ${VOICE_OBD_URL:-http://180.150.248.111:8096/OBDSEA}\n\
+    \    username: ${VOICE_OBD_USER:-}\n    password: ${VOICE_OBD_PASS:-}\n    caller_id:\
+    \ ${VOICE_OBD_DNID:-NA}     # the DNID (caller number) the provider assigned to\
+    \ your account\n    language: ${VOICE_OBD_LANG:-1}       # TTS language code on\
+    \ the dialer panel (1 = default; try 2.. if the call is silent)\n    # tts: local\
+    \                         # local (default): speak with espeak-ng, upload the\
+    \ MP3, play by soundId -\n    #                                    #   works even\
+    \ when the dialer's own TTS is silent; \"dialer\" = use the dialer's TTS\n   \
+    \ # voice: en-us                       # espeak-ng voice for local TTS (en-us,\
+    \ en-gb, hi ...); speed: 150\n    # clip_format: wav                   # wav (8\
+    \ kHz PCM, telephony default) | mp3 (44.1 kHz) - whichever the dialer plays\n\
+    \    # format: form                       # form (default, what the dialer accepts\
+    \ for TTS) | json\n    max_call_s: 45\n    ack_digit: \"1\"\n    retries: 1\n\
+    \    retry_after: \"00:01:00\"\n  dial112_cad:\n    type: webhook\n    enabled:\
+    \ false\n    url: https://cad.example.gov.in/api/cctv-events\n    secret: ${CAD_WEBHOOK_SECRET:-}\n\
+    \n# Routes: which events go where. kind: alert | incident | camera.health | break_glass\
+    \ | *\n# Optional filters: priority (string or list), departments (list), subkind\
+    \ (alert match \"exact\"/\"fuzzy\"/\"rule\",\n# incident kind, or the offence\
+    \ code in watchlist_plate e.g. OVER_SPEED).\nroutes:\n  - {kind: alert, subkind:\
+    \ exact, priority: high, channel: sms_gateway, to: [\"+919999999999\"]}\n  - {kind:\
+    \ alert, subkind: exact, channel: dial112_cad}\n  # phone the duty officer for\
+    \ high-priority watchlist hits (press 1 on the call = acknowledged)\n  - {kind:\
+    \ alert, subkind: exact, priority: high, channel: voice_call, to: [\"+919999999999\"\
+    ]}\n  - {kind: incident, priority: high, channel: whatsapp_cloud, to: [\"+919999999999\"\
+    ]}\n  - {kind: camera.health, channel: control_room_email, to: [\"noc@example.gov.in\"\
+    ]}\n  - {kind: break_glass, channel: control_room_email, to: [\"security-admin@example.gov.in\"\
+    ]}\n  # weekly ANPR accuracy report (written every Monday by the archiver) - kind\
+    \ \"report\"\n  - {kind: report, channel: control_room_email, to: [\"cctv-lead@example.gov.in\"\
+    ]}\n"
+  tenants.yaml: "# Multi-tenancy: one deployment serving several cities / authorities.\
+    \ A tenant is a named set of\n# departments with its own branding; users, API\
+    \ keys and cases are scoped to their tenant's departments.\n# The special tenant\
+    \ \"central\" sees everything (state-level control room). Users pick up their\
+    \ tenant from\n# users.yaml (`tenant:`), the LDAP/OIDC group map (`tenant:`),\
+    \ or default to the tenant that owns their\n# departments.\ntenants:\n  - id:\
+    \ central\n    name: State Command Centre\n    departments: [\"*\"]\n  - id: city-a\n\
+    \    name: City A Smart City SPV\n    departments: [Police, Municipal]\n    branding:\
+    \ {title: \"City A CCTV\", accent: \"#3b82f6\"}\n  - id: city-b\n    name: City\
+    \ B Police Commissionerate\n    departments: [Traffic]\n    branding: {title:\
+    \ \"City B Traffic Command\", accent: \"#f59e0b\"}\n"
+  vendors.yaml: "# Vendor presets for departmental systems. A source in sources.yaml\
+    \ can say `vendor: hikvision` and only\n# fill in host / credentials / channels;\
+    \ the preset supplies the adapter and its endpoints.\n#\n# These are built from\
+    \ the vendors' public documentation and the platform's own ONVIF / RTSP support.\n\
+    # They have NOT been verified against every firmware; treat each as a starting\
+    \ point and confirm with the\n# vendor's integration guide. Where a VMS speaks\
+    \ ONVIF Profile S/T, `onvif` is the safest choice.\npresets:\n  hikvision:   \
+    \           # NVR / DVR / cameras (ISAPI); streams via standard RTSP paths\n \
+    \   adapter: rtsp_template\n    onvif_port: 80\n    main: \"rtsp://{host}:{rtsp_port}/Streaming/Channels/{channel}01\"\
+    \n    sub:  \"rtsp://{host}:{rtsp_port}/Streaming/Channels/{channel}02\"\n   \
+    \ notes: \"Enable RTSP + ONVIF under Network > Advanced > Integration Protocol;\
+    \ create a viewer-level user.\"\n  dahua:\n    adapter: rtsp_template\n    onvif_port:\
+    \ 80\n    main: \"rtsp://{host}:{rtsp_port}/cam/realmonitor?channel={channel}&subtype=0\"\
+    \n    sub:  \"rtsp://{host}:{rtsp_port}/cam/realmonitor?channel={channel}&subtype=1\"\
+    \n    notes: \"Same paths for CP Plus (Dahua OEM). ONVIF on port 80 by default.\"\
+    \n  cpplus:\n    extends: dahua\n  uniview:\n    adapter: rtsp_template\n    onvif_port:\
+    \ 80\n    main: \"rtsp://{host}:{rtsp_port}/unicast/c{channel}/s0/live\"\n   \
+    \ sub:  \"rtsp://{host}:{rtsp_port}/unicast/c{channel}/s1/live\"\n  axis:\n  \
+    \  adapter: rtsp_template\n    onvif_port: 80\n    main: \"rtsp://{host}:{rtsp_port}/axis-media/media.amp?camera={channel}&streamprofile=Quality\"\
+    \n    sub:  \"rtsp://{host}:{rtsp_port}/axis-media/media.amp?camera={channel}&streamprofile=Balanced\"\
+    \n  honeywell:\n    adapter: onvif\n    onvif_port: 80\n    notes: \"Honeywell\
+    \ MAXPRO / Performance Series NVRs expose ONVIF Profile S; use the onvif adapter.\"\
+    \n  bosch:\n    adapter: onvif\n    onvif_port: 80\n    notes: \"Bosch cameras\
+    \ / DIVAR expose ONVIF; BVMS itself is reached through its Video SDK (sdk_bridge).\"\
+    \n  milestone:              # XProtect API Gateway (2022 R2+): OAuth password\
+    \ grant, REST cameras, RTSP via Mobile Server or direct\n    adapter: vendor_rest\n\
+    \    api:\n      login_path: /IDP/connect/token\n      login_mode: form\n    \
+    \  login_body: {grant_type: password, username: \"{user}\", password: \"{password}\"\
+    , client_id: GrantValidatorClient}\n      token_field: access_token\n      cameras_path:\
+    \ /api/rest/v1/cameras\n      cameras_list_field: array\n      id_field: id\n\
+    \      name_field: name\n      online_field: enabled\n      online_value: \"True\"\
+    \n      stream_template: \"rtsp://{host}:554/live/{id}\"      # Milestone RTSP\
+    \ on the Recording Server (enable in Management Client)\n      profiles: {main:\
+    \ main}\n      stream_needs_credentials: true\n    notes: \"Base URL = https://<api-gateway-host>/.\
+    \ RTSP via the XProtect RTSP service or ONVIF Bridge.\"\n  genetec:          \
+    \      # Security Center Web SDK (basic auth, JSON with format=json)\n    adapter:\
+    \ vendor_rest\n    api:\n      login_path: \"\"\n      api_key_header: Authorization\n\
+    \      api_key_value: \"Basic {basic}\"                       # {basic} = base64(user;appid:password),\
+    \ see docs\n      cameras_path: /WebSdk/report/EntityConfiguration?q=EntityTypes@Camera,Name,RunningState&format=json\n\
+    \      cameras_list_field: Rsp.Result\n      id_field: Guid\n      name_field:\
+    \ Name\n      online_field: RunningState\n      online_value: Running\n      stream_template:\
+    \ \"rtsp://{host}:554/{id}\"           # Genetec Media Gateway RTSP\n      profiles:\
+    \ {main: main}\n      stream_needs_credentials: true\n    notes: \"Requires a\
+    \ Web SDK licence and a Media Gateway role; the app id is part of the basic credential.\"\
+    \n"
+  mediamtx.yml: "# Platform stream relay (MediaMTX).\n# - Pulls each departmental\
+    \ stream ONCE (on demand) and re-serves it to any number\n#   of operators over\
+    \ WebRTC (<1 s) or HLS (fallback), and to ANPR workers over RTSP.\n# - Paths are\
+    \ created at runtime by the adapter service through the control API.\n# - Every\
+    \ read/publish/API request is authorised by the platform API\n#   (/internal/relay-auth),\
+    \ which checks the viewer's token, department rights and\n#   the per-source concurrent-pull\
+    \ cap.\nlogLevel: info\nwriteQueueSize: 4096\napi: yes\napiAddress: :9997\nmetrics:\
+    \ yes\nmetricsAddress: :9998\n\nrtspAddress: :8554\nrtpAddress: :8000\nrtcpAddress:\
+    \ :8001\nrtspTransports: [tcp]\nrtmp: no\nsrt: no\n\nwebrtc: yes\nwebrtcAddress:\
+    \ :8889\nwebrtcAllowOrigin: '*'\nwebrtcLocalUDPAddress: :8189\nwebrtcLocalTCPAddress:\
+    \ :8189      # ICE over TCP as well: cloud / corporate networks often block UDP\n\
+    webrtcIPsFromInterfaces: yes\n# webrtcAdditionalHosts: [command-centre.example.gov.in]\n\
+    \nhls: yes\nhlsAddress: :8888\nhlsAllowOrigin: '*'\nhlsVariant: mpegts\nhlsSegmentCount:\
+    \ 5\nhlsSegmentDuration: 1s\nhlsAlwaysRemux: no\n\n# Recording + playback (video\
+    \ archive). Recorded paths are chosen by the adapter service\n# (RECORD_MODE /\
+    \ per-source `record:`); segments land on the relay's local disk as a short\n\
+    # buffer and the archiver service copies them to object storage. The playback\
+    \ server cuts\n# event clips out of the buffered segments for the archiver.\n\
+    playback: yes\nplaybackAddress: :9996\n\nauthMethod: http\nauthHTTPAddress: http://127.0.0.1:8000/internal/relay-auth\
+    \   # override: MTX_AUTHHTTPADDRESS\nauthHTTPExclude:\n  - action: metrics\n \
+    \ - action: pprof\n\npathDefaults:\n  rtspTransport: tcp\n  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f\
+    \     # override: MTX_PATHDEFAULTS_RECORDPATH\n  recordFormat: fmp4\n  recordPartDuration:\
+    \ 1s\n  recordSegmentDuration: 60s\n  recordDeleteAfter: 6h\n  # sourceOnDemand\
+    \ / close-after are set per camera path by the adapter service\n\npaths:\n  #\
+    \ Browser compatibility transcode for sources the browser cannot decode (H.265\
+    \ / HEVC, MPEG-4,\n  # MJPEG): \"<camera>/<profile>-h264\" is started on demand\
+    \ when the console's WebRTC offer is\n  # rejected with \"codecs not supported\"\
+    . Reads the platform's own relay path, so the departmental\n  # source is still\
+    \ pulled only once; recording and the ANPR / analytics workers keep the original.\n\
+    \  # ~1 CPU core per 1080p stream (libx264 veryfast); only viewers' cameras are\
+    \ transcoded.\n  # NOTE: MediaMTX runs this without a shell: no ${VAR:-default}\
+    \ expansion, only its own $MTX_PATH / $G1 / $RTSP_PORT.\n  \"~^([^/]+)/(main|sub)-h264$\"\
+    :\n    source: publisher\n    runOnDemand: >-\n      ffmpeg -loglevel error -rtsp_transport\
+    \ tcp -fflags nobuffer -flags low_delay\n      -i rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/${G1}/${G2}\n\
+    \      -an -c:v libx264 -preset veryfast -tune zerolatency -profile:v baseline\
+    \ -pix_fmt yuv420p\n      -b:v 2500k -maxrate 2500k -bufsize 1500k -g 30 -bf 0\n\
+    \      -f rtsp rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/$MTX_PATH\n\
+    \    runOnDemandRestart: yes\n    runOnDemandStartTimeout: 20s\n    runOnDemandCloseAfter:\
+    \ 10s\n\n  # Compatibility transcode, only started when a browser without H.264\
+    \ (some Linux Chromium\n  # builds) asks for \"<camera>/<profile>-vp8\". Reads\
+    \ the platform's own relay path, so the\n  # departmental source is still pulled\
+    \ only once.\n  \"~^([^/]+)/(main|sub)-vp8$\":\n    source: publisher\n    runOnDemand:\
+    \ >-\n      ffmpeg -loglevel error -rtsp_transport tcp\n      -i rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/${G1}/${G2}\n\
+    \      -an -c:v libvpx -deadline realtime -cpu-used 8 -b:v 700k -g 30 -vf scale=-2:360\n\
+    \      -f rtsp rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/$MTX_PATH\n\
+    \    runOnDemandRestart: yes\n    runOnDemandStartTimeout: 20s\n    runOnDemandCloseAfter:\
+    \ 10s\n"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uvp-data
+  namespace: unified-cctv
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uvp-recordings
+  namespace: unified-cctv
+spec:
+  accessModes:
+  - ReadWriteMany
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 400Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: unified-cctv
+  labels:
+    app: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8000'
+    spec:
+      containers:
+      - name: api
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-api:1.7.2
+        command:
+        - python
+        - -m
+        - uvicorn
+        - uvp.services.api:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8000'
+        - --workers
+        - '2'
+        env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+        - name: ES_URL
+          value: http://elasticsearch.search.svc:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '0'
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          initialDelaySeconds: 20
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8000
+          periodSeconds: 5
+          failureThreshold: 36
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: unified-cctv
+spec:
+  selector:
+    app: api
+  ports:
+  - port: 8000
+    targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+  namespace: unified-cctv
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adapters
+  namespace: unified-cctv
+  labels:
+    app: adapters
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adapters
+  template:
+    metadata:
+      labels:
+        app: adapters
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9100'
+    spec:
+      containers:
+      - name: adapters
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-adapters:1.7.2
+        command:
+        - python
+        - -m
+        - uvp.services.adapter_service
+        env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+        - name: ES_URL
+          value: http://elasticsearch.search.svc:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '9100'
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          periodSeconds: 10
+          failureThreshold: 30
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        ports:
+        - containerPort: 9100
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indexer
+  namespace: unified-cctv
+  labels:
+    app: indexer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: indexer
+  template:
+    metadata:
+      labels:
+        app: indexer
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9100'
+    spec:
+      containers:
+      - name: indexer
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-indexer:1.7.2
+        command:
+        - python
+        - -m
+        - uvp.services.indexer
+        env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+        - name: ES_URL
+          value: http://elasticsearch.search.svc:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '9100'
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          periodSeconds: 10
+          failureThreshold: 30
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        ports:
+        - containerPort: 9100
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archiver
+  namespace: unified-cctv
+  labels:
+    app: archiver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: archiver
+  template:
+    metadata:
+      labels:
+        app: archiver
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9100'
+    spec:
+      containers:
+      - name: archiver
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-archiver:1.7.2
+        command:
+        - python
+        - -m
+        - uvp.services.archiver
+        env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+        - name: ES_URL
+          value: http://elasticsearch.search.svc:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '9100'
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          periodSeconds: 10
+          failureThreshold: 30
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        ports:
+        - containerPort: 9100
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics
+  namespace: unified-cctv
+  labels:
+    app: analytics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analytics
+  template:
+    metadata:
+      labels:
+        app: analytics
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9100'
+    spec:
+      containers:
+      - name: analytics
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-analytics:1.7.2
+        command:
+        - python
+        - -m
+        - uvp.services.analytics_worker
+        env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+        - name: ES_URL
+          value: http://elasticsearch.search.svc:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '9100'
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          periodSeconds: 10
+          failureThreshold: 30
+        resources:
+          requests:
+            cpu: '1'
+            memory: 2Gi
+          limits:
+            cpu: '1'
+            memory: 2Gi
+        ports:
+        - containerPort: 9100
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: faces
+  namespace: unified-cctv
+  labels:
+    app: faces
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: faces
+  template:
+    metadata:
+      labels:
+        app: faces
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9100'
+    spec:
+      containers:
+      - name: faces
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-faces:1.7.2
+        command:
+        - python
+        - -m
+        - uvp.services.face_worker
+        env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+        - name: ES_URL
+          value: http://elasticsearch.search.svc:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '9100'
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          periodSeconds: 10
+          failureThreshold: 30
+        resources:
+          requests:
+            cpu: '1'
+            memory: 2Gi
+          limits:
+            cpu: '1'
+            memory: 2Gi
+        ports:
+        - containerPort: 9100
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hotlist
+  namespace: unified-cctv
+  labels:
+    app: hotlist
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hotlist
+  template:
+    metadata:
+      labels:
+        app: hotlist
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9100'
+    spec:
+      containers:
+      - name: hotlist
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-hotlist:1.7.2
+        command:
+        - python
+        - -m
+        - uvp.services.hotlist_sync
+        env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+        - name: ES_URL
+          value: http://elasticsearch.search.svc:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '9100'
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          periodSeconds: 10
+          failureThreshold: 30
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        ports:
+        - containerPort: 9100
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: anpr
+  namespace: unified-cctv
+  labels:
+    app: anpr
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: anpr
+  template:
+    metadata:
+      labels:
+        app: anpr
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9100'
+    spec:
+      containers:
+      - name: anpr
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-anpr:1.7.2
+        command:
+        - sh
+        - -c
+        - export ANPR_SHARD=${HOSTNAME##*-}/2; exec python -m uvp.services.anpr_worker
+        env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+        - name: ES_URL
+          value: http://elasticsearch.search.svc:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '9100'
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        startupProbe:
+          httpGet:
+            path: /metrics
+            port: 9100
+          periodSeconds: 10
+          failureThreshold: 30
+        resources:
+          requests:
+            cpu: '2'
+            memory: 3Gi
+          limits:
+            cpu: '2'
+            memory: 3Gi
+        ports:
+        - containerPort: 9100
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull
+  serviceName: anpr
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anpr
+  namespace: unified-cctv
+spec:
+  clusterIP: None
+  selector:
+    app: anpr
+  ports:
+  - port: 9100
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: relay
+  namespace: unified-cctv
+spec:
+  serviceName: relay
+  replicas: 2
+  selector:
+    matchLabels:
+      app: relay
+  template:
+    metadata:
+      labels:
+        app: relay
+    spec:
+      imagePullSecrets:
+      - name: ocir-pull
+      containers:
+      - name: mediamtx
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-relay:1.7.2
+        livenessProbe:
+          httpGet:
+            path: /v3/paths/list
+            port: 9997
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /v3/paths/list
+            port: 9997
+          periodSeconds: 10
+        env:
+        - name: MTX_AUTHHTTPADDRESS
+          value: http://api:8000/internal/relay-auth
+        - name: TZ
+          value: UTC
+        - name: MTX_PATHDEFAULTS_RECORDPATH
+          value: /recordings/$(POD_NAME)/%path/%Y-%m-%d_%H-%M-%S-%f
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        ports:
+        - containerPort: 8554
+        - containerPort: 8889
+        - containerPort: 8888
+        - containerPort: 9997
+        - containerPort: 9996
+        - containerPort: 9998
+        - containerPort: 8189
+          protocol: UDP
+        - containerPort: 8189
+          protocol: TCP
+        volumeMounts:
+        - name: config
+          mountPath: /mediamtx.yml
+          subPath: mediamtx.yml
+        - name: recordings
+          mountPath: /recordings
+        resources:
+          requests:
+            cpu: '1'
+            memory: 1Gi
+          limits:
+            cpu: '4'
+            memory: 4Gi
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay
+  namespace: unified-cctv
+spec:
+  clusterIP: None
+  selector:
+    app: relay
+  ports:
+  - name: rtsp
+    port: 8554
+  - name: whep
+    port: 8889
+  - name: hls
+    port: 8888
+  - name: api
+    port: 9997
+  - name: playback
+    port: 9996
+  - name: metrics
+    port: 9998
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: uvp
+  namespace: unified-cctv
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '3600'
+spec:
+  tls:
+  - hosts:
+    - cctv.example.gov.in
+    secretName: uvp-tls
+  rules:
+  - host: cctv.example.gov.in
+    http:
+      paths:
+      - path: /relay/webrtc
+        pathType: Prefix
+        backend:
+          service:
+            name: relay
+            port:
+              number: 8889
+      - path: /relay/hls
+        pathType: Prefix
+        backend:
+          service:
+            name: relay
+            port:
+              number: 8888
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api
+            port:
+              number: 8000
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: indexer
+  namespace: unified-cctv
+spec:
+  scaleTargetRef:
+    name: indexer
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+      consumerGroup: uvp-indexer
+      topic: anpr.events
+      lagThreshold: '500'
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: unified-cctv
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api
+
