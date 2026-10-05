@@ -34,6 +34,10 @@ spec:
                   key: POSTGRES_PASSWORD
 
             - name: POSTGRES_DB
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
               valueFrom:
                 secretKeyRef:
                   name: postgres-secret
@@ -42,7 +46,6 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
-
           readinessProbe:
             exec:
               command:
