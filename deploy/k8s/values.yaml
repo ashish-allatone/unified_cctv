@@ -1,6 +1,7 @@
 # Inputs for deploy/k8s/render.py (python deploy/k8s/render.py > manifests.yaml). The same values map 1:1 to
 # a Helm chart; the generator is used because it can be validated without a cluster.
 namespace: unified-cctv
+imagePullSecret: ocir-pull
 image: registry.example.gov.in/uvp/platform:0.1
 imageGpu: registry.example.gov.in/uvp/platform-gpu:0.1
 publicHost: cctv.example.gov.in
