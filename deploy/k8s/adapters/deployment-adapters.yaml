@@ -25,7 +25,7 @@ spec:
         - python
         - -m
         - uvp.services.adapter_service
-        env:
+      env:
         - name: CORP8_USER
           valueFrom:
             secretKeyRef:
