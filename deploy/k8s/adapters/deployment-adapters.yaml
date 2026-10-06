@@ -26,6 +26,17 @@ spec:
         - -m
         - uvp.services.adapter_service
         env:
+        - name: CORP8_USER
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: CORP8_USER
+
+        - name: CORP8_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: CORP8_PASS
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
