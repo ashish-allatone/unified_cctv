@@ -35,16 +35,10 @@ spec:
           env:
             # CORP8
             - name: CORP8_USER
-              valueFrom:
-                secretKeyRef:
-                  name: uvp-secrets
-                  key: CORP8_USER
+              value: "naresh@allatone.in"
 
             - name: CORP8_PASS
-              valueFrom:
-                secretKeyRef:
-                  name: uvp-secrets
-                  key: CORP8_PASS
+              value: "8WT5-YZ97-6UDA"
 
             # Kafka
             - name: BUS
