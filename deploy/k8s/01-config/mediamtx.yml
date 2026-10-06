@@ -43,7 +43,8 @@ playback: yes
 playbackAddress: :9996
 
 authMethod: http
-authHTTPAddress: http://127.0.0.1:8000/internal/relay-auth   # override: MTX_AUTHHTTPADDRESS
+#authHTTPAddress: http://127.0.0.1:8000/internal/relay-auth   # override: MTX_AUTHHTTPADDRESS
+authHTTPAddress: http://api:8000/internal/relay-auth   #- new value
 authHTTPExclude:
   - action: metrics
   - action: pprof
