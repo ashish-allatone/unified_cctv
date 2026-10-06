@@ -363,7 +363,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:31
         command:
         - python
         - -m
@@ -379,9 +379,9 @@ spec:
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
-          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+          value: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
         - name: ES_URL
-          value: http://elasticsearch.search.svc:9200
+          value: http://elasticsearch.unified-cctv.svc.cluster.local:9200
         - name: API_URL
           value: http://api:8000
         - name: RELAY_APIS
@@ -541,7 +541,7 @@ spec:
     spec:
       containers:
       - name: adapters
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:31
         command:
         - python
         - -m
@@ -550,9 +550,9 @@ spec:
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
-          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+          value: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
         - name: ES_URL
-          value: http://elasticsearch.search.svc:9200
+          value: http://elasticsearch.unified-cctv.svc.cluster.local:9200
         - name: API_URL
           value: http://api:8000
         - name: RELAY_APIS
@@ -680,7 +680,7 @@ spec:
     spec:
       containers:
       - name: indexer
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:31
         command:
         - python
         - -m
@@ -689,9 +689,9 @@ spec:
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
-          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+          value: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
         - name: ES_URL
-          value: http://elasticsearch.search.svc:9200
+          value: http://elasticsearch.unified-cctv.svc.cluster.local:9200
         - name: API_URL
           value: http://api:8000
         - name: RELAY_APIS
@@ -819,7 +819,7 @@ spec:
     spec:
       containers:
       - name: archiver
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:31
         command:
         - python
         - -m
@@ -828,9 +828,9 @@ spec:
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
-          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+          value: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
         - name: ES_URL
-          value: http://elasticsearch.search.svc:9200
+          value: http://elasticsearch.unified-cctv.svc.cluster.local:9200
         - name: API_URL
           value: http://api:8000
         - name: RELAY_APIS
@@ -958,7 +958,7 @@ spec:
     spec:
       containers:
       - name: analytics
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:31
         command:
         - python
         - -m
@@ -967,9 +967,9 @@ spec:
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
-          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+          value: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
         - name: ES_URL
-          value: http://elasticsearch.search.svc:9200
+          value: http://elasticsearch.unified-cctv.svc.cluster.local:9200
         - name: API_URL
           value: http://api:8000
         - name: RELAY_APIS
@@ -1097,7 +1097,7 @@ spec:
     spec:
       containers:
       - name: hotlist
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:31
         command:
         - python
         - -m
@@ -1106,9 +1106,9 @@ spec:
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
-          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+          value: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
         - name: ES_URL
-          value: http://elasticsearch.search.svc:9200
+          value: http://elasticsearch.unified-cctv.svc.cluster.local:9200
         - name: API_URL
           value: http://api:8000
         - name: RELAY_APIS
@@ -1236,7 +1236,7 @@ spec:
     spec:
       containers:
       - name: anpr
-        image: bom.ocir.io/bmpirqtfolte/uvp-platform:30
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:31
         command:
         - sh
         - -c
@@ -1245,9 +1245,9 @@ spec:
         - name: BUS
           value: kafka
         - name: KAFKA_BOOTSTRAP
-          value: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
+          value: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
         - name: ES_URL
-          value: http://elasticsearch.search.svc:9200
+          value: http://elasticsearch.unified-cctv.svc.cluster.local:9200
         - name: API_URL
           value: http://api:8000
         - name: RELAY_APIS
