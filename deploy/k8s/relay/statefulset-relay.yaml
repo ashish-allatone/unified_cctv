@@ -20,6 +20,7 @@ spec:
         env:
         - name: MTX_AUTHHTTPADDRESS
           value: http://api:8000/internal/relay-auth
+        
         - name: TZ
           value: UTC
         - name: MTX_PATHDEFAULTS_RECORDPATH
@@ -31,7 +32,10 @@ spec:
         - name: RELAY_INTERNAL_USER
           value: uvp-internal
         - name: RELAY_INTERNAL_PASS
-          value: change-me-relay
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
         ports:
         - containerPort: 8554
         - containerPort: 8889
