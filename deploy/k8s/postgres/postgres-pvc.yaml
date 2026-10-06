@@ -9,4 +9,4 @@ spec:
   storageClassName: oci-bv
   resources:
     requests:
-      storage: 20Gi
+      storage: 200Gi
