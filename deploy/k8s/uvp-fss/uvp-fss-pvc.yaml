@@ -9,7 +9,7 @@ spec:
   storageClassName: unified-cctv-fss-data
   resources:
     requests:
-      storage: 500Gi
+      storage: 50Gi
   volumeName: uvp-data-fss-pv
 ---
 apiVersion: v1
@@ -23,5 +23,5 @@ spec:
   storageClassName: unified-cctv-fss-recordings
   resources:
     requests:
-      storage: 1Ti
+      storage: 400Gi
   volumeName: uvp-recordings-fss-pv
