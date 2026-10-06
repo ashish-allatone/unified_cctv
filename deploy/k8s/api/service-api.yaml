@@ -4,8 +4,10 @@ metadata:
   name: api
   namespace: unified-cctv
 spec:
+  type: NodePort
   selector:
     app: api
   ports:
-  - port: 8000
-    targetPort: 8000
+    - port: 8000
+      targetPort: 8000
+      nodePort: 31588
