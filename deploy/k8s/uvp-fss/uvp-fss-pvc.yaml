@@ -6,11 +6,15 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
+
   storageClassName: unified-cctv-fss-data
+
   resources:
     requests:
-      storage: 50Gi
+      storage: 500Gi
+
   volumeName: uvp-data-fss-pv
+
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -20,8 +24,11 @@ metadata:
 spec:
   accessModes:
     - ReadWriteMany
+
   storageClassName: unified-cctv-fss-recordings
+
   resources:
     requests:
-      storage: 400Gi
+      storage: 1Ti
+
   volumeName: uvp-recordings-fss-pv
