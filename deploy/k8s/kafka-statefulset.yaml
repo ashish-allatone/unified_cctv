@@ -66,7 +66,7 @@ spec:
               value: "168"
 
             - name: KAFKA_LOG_DIRS
-              value: "/var/lib/kafka/data"
+              value: /var/lib/kafka/data/kafka-logs
 
           volumeMounts:
             - name: kafka-data
