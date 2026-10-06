@@ -4,7 +4,7 @@ metadata:
   name: uvp-data-fss-pv
 spec:
   capacity:
-    storage: 500Gi
+    storage: 50Gi
   accessModes:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
@@ -21,7 +21,7 @@ metadata:
   name: uvp-recordings-fss-pv
 spec:
   capacity:
-    storage: 1Ti
+    storage: 400Gi
   accessModes:
     - ReadWriteMany
   persistentVolumeReclaimPolicy: Retain
