@@ -1,0 +1,72 @@
+# Notification channels and routing. Secrets via ${ENV}. Every attempt is logged (Admin → Notifications).
+#
+# Channel types:
+#   email     SMTP (host, port, tls, user, password, from)
+#   sms       any HTTP SMS gateway: url, method, headers, body template with {to} and {text}
+#             (works with Twilio-compatible and Indian DLT gateways that accept JSON)
+#   whatsapp  same shape; example below is the WhatsApp Cloud API text message
+#   webhook   signed JSON POST (X-UVP-Signature = HMAC-SHA256 of the body) - e.g. Dial-112 / CAD intake
+#   voice     automated phone call through a BulkOBD-compatible outbound dialer (POST <url>/voiceBlast):
+#             url (base URL of the dialer), username/password (dialer account), language ("1"), max_call_s,
+#             ack_digit ("1" = the call asks to press 1; the dialer's result webhook then acknowledges the alert),
+#             sound_id (play a pre-recorded clip uploaded on the dialer panel instead of text-to-speech),
+#             caller_id, retries, retry_after. Result webhook: <server>/api/integrations/voice/callback?key=${VOICE_CALLBACK_KEY}
+channels:
+  control_room_email:
+    type: email
+    enabled: false
+    host: smtp.example.gov.in
+    port: 587
+    tls: true
+    user: ${SMTP_USER:-}
+    password: ${SMTP_PASS:-}
+    from: cctv-alerts@example.gov.in
+  sms_gateway:
+    type: sms
+    enabled: false
+    url: https://sms.example.in/api/send
+    method: POST
+    headers: {Authorization: "Bearer ${SMS_API_KEY:-}"}
+    body: {sender: "CCTVPL", to: "{to}", message: "{text}"}
+  whatsapp_cloud:
+    type: whatsapp
+    enabled: false
+    url: https://graph.facebook.com/v19.0/${WA_PHONE_ID:-0}/messages
+    headers: {Authorization: "Bearer ${WA_TOKEN:-}"}
+    body: {messaging_product: whatsapp, to: "{to}", type: text, text: {body: "{text}"}}
+  voice_call:
+    type: voice
+    enabled: false
+    url: ${VOICE_OBD_URL:-http://180.150.248.111:8096/OBDSEA}
+    username: ${VOICE_OBD_USER:-}
+    password: ${VOICE_OBD_PASS:-}
+    caller_id: ${VOICE_OBD_DNID:-NA}     # the DNID (caller number) the provider assigned to your account
+    language: ${VOICE_OBD_LANG:-1}       # TTS language code on the dialer panel (1 = default; try 2.. if the call is silent)
+    # tts: local                         # local (default): speak with espeak-ng, upload the MP3, play by soundId -
+    #                                    #   works even when the dialer's own TTS is silent; "dialer" = use the dialer's TTS
+    # voice: en-us                       # espeak-ng voice for local TTS (en-us, en-gb, hi ...); speed: 150
+    # clip_format: wav                   # wav (8 kHz PCM, telephony default) | mp3 (44.1 kHz) - whichever the dialer plays
+    # format: form                       # form (default, what the dialer accepts for TTS) | json
+    max_call_s: 45
+    ack_digit: "1"
+    retries: 1
+    retry_after: "00:01:00"
+  dial112_cad:
+    type: webhook
+    enabled: false
+    url: https://cad.example.gov.in/api/cctv-events
+    secret: ${CAD_WEBHOOK_SECRET:-}
+
+# Routes: which events go where. kind: alert | incident | camera.health | break_glass | *
+# Optional filters: priority (string or list), departments (list), subkind (alert match "exact"/"fuzzy"/"rule",
+# incident kind, or the offence code in watchlist_plate e.g. OVER_SPEED).
+routes:
+  - {kind: alert, subkind: exact, priority: high, channel: sms_gateway, to: ["+919999999999"]}
+  - {kind: alert, subkind: exact, channel: dial112_cad}
+  # phone the duty officer for high-priority watchlist hits (press 1 on the call = acknowledged)
+  - {kind: alert, subkind: exact, priority: high, channel: voice_call, to: ["+919999999999"]}
+  - {kind: incident, priority: high, channel: whatsapp_cloud, to: ["+919999999999"]}
+  - {kind: camera.health, channel: control_room_email, to: ["noc@example.gov.in"]}
+  - {kind: break_glass, channel: control_room_email, to: ["security-admin@example.gov.in"]}
+  # weekly ANPR accuracy report (written every Monday by the archiver) - kind "report"
+  - {kind: report, channel: control_room_email, to: ["cctv-lead@example.gov.in"]}

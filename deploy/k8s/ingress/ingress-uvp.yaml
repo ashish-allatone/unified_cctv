@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: uvp
+  namespace: unified-cctv
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '3600'
+spec:
+  tls:
+  - hosts:
+    - cctv.example.gov.in
+    secretName: uvp-tls
+  rules:
+  - host: cctv.example.gov.in
+    http:
+      paths:
+      - path: /relay/webrtc
+        pathType: Prefix
+        backend:
+          service:
+            name: relay
+            port:
+              number: 8889
+      - path: /relay/hls
+        pathType: Prefix
+        backend:
+          service:
+            name: relay
+            port:
+              number: 8888
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: api
+            port:
+              number: 8000

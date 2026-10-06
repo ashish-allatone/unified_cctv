@@ -1,0 +1,322 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: uvp-config
+  namespace: unified-cctv
+data:
+  sources.yaml: "# Departmental sources the platform reads from. One entry per VMS\
+    \ / NVR.\n# Credentials come from environment variables (.env) - never write them\
+    \ here.\n# Keep the \"sources:\" line at the top: every entry is indented under\
+    \ it.\n# The two simulator departments (police, municipal) were removed. To demo\
+    \ again: docker compose --profile sim up -d\n# and restore their entries from\
+    \ config/sources.example.yaml.\nsources:\n  # Corp8 / Sentinel grid (Gujarat Police\
+    \ Innovation Challenge). The web portal and its cameras.json / HLS\n  # need a\
+    \ browser sign-in with OTP, so the platform uses the RTSP gateway directly: every\
+    \ connection carries the\n  # registered email + access password in the URL (email\
+    \ @ -> %40, done automatically), TCP transport.\n  - id: corp8\n    department:\
+    \ Corp8\n    name: Corp8 Sentinel cameras (challenge grid)\n    adapter: rtsp_template\n\
+    \    host: 103.250.160.189\n    rtsp_port: 8554\n    main: \"rtsp://{host}:{rtsp_port}/stream/cam{channel:02d}\"\
+    \n    username_env: CORP8_USER                  # registered email (.env)\n  \
+    \  password_env: CORP8_PASS                  # access password (.env)\n    max_concurrent_pulls:\
+    \ 10\n    persistent_pull: true\n    channels:                               \
+    \  # names from the Live Grid; cam21-cam30 names to fill in; anpr on plate-facing\
+    \ views\n      - {channel: 1, id: cam01, name: \"Chiman bhai Bridge\", anpr: true}\n\
+    \      - {channel: 2, id: cam02, name: \"Janpath\"}\n      - {channel: 3, id:\
+    \ cam03, name: \"O.N.G.C. Office\"}\n      - {channel: 4, id: cam04, name: \"\
+    Paldi Circle\"}\n      - {channel: 5, id: cam05, name: \"Visat teen Rasta\"}\n\
+    \      - {channel: 6, id: cam06, name: \"Timbavadi gate, Junagadh\", anpr: true}\n\
+    \      - {channel: 7, id: cam07, name: \"Hero showroom, Gir Somnath\"}\n     \
+    \ - {channel: 8, id: cam08, name: \"Majevadi gate, Junagadh\", anpr: true}\n \
+    \     - {channel: 9, id: cam09, name: \"New bypass near BY circle, Junagadh\"\
+    }\n      - {channel: 10, id: cam10, name: \"Char chowk road 2, Junagadh\"}\n \
+    \     - {channel: 11, id: cam11, name: \"Dolatpara, Junagadh\"}\n      - {channel:\
+    \ 12, id: cam12, name: \"Tri Mandir Adalaj Tollnaka\", anpr: true}\n      - {channel:\
+    \ 13, id: cam13, name: \"CN Vidhyalaya\"}\n      - {channel: 14, id: cam14, name:\
+    \ \"Delight RLVD\", anpr: true}\n      - {channel: 15, id: cam15, name: \"Suvidha\
+    \ park\"}\n      - {channel: 16, id: cam16, name: \"Visat P2\"}\n      - {channel:\
+    \ 17, id: cam17, name: \"Rajkot Bus Port CCTV\", anpr: true}\n      - {channel:\
+    \ 18, id: cam18, name: \"Rajkot CCTV\"}\n      - {channel: 19, id: cam19, name:\
+    \ \"Khaparia Gram Panchayat, Gandevi, Navsari\"}\n      - {channel: 20, id: cam20,\
+    \ name: \"Mohanpura\"}\n      - {channel: 21, id: cam21, name: \"CAM21\"}\n  \
+    \    - {channel: 22, id: cam22, name: \"CAM22\"}\n      - {channel: 23, id: cam23,\
+    \ name: \"CAM23\"}\n      - {channel: 24, id: cam24, name: \"CAM24\"}\n      -\
+    \ {channel: 25, id: cam25, name: \"CAM25\"}\n      - {channel: 26, id: cam26,\
+    \ name: \"CAM26\"}\n      - {channel: 27, id: cam27, name: \"CAM27\"}\n      -\
+    \ {channel: 28, id: cam28, name: \"CAM28\"}\n      - {channel: 29, id: cam29,\
+    \ name: \"CAM29\"}\n      - {channel: 30, id: cam30, name: \"CAM30\"}\n"
+  users.yaml: "# Pilot users (local provider). Production: enable LDAP/AD or OIDC\
+    \ in config/auth.yaml. Hash: python -m uvp.auth <password>\n# Demo passwords:\
+    \ admin/admin123 supervisor/super123 police_op/police123 muni_op/muni123 viewer/viewer123\n\
+    users:\n  - username: admin\n    role: admin\n    departments: [\"*\"]\n    password_hash:\
+    \ \"pbkdf2$4092307e751b30de$f4a84c96d4c6e5b88a6dbf81aecde0f5265e70b0dbacf5d993c6b84de56b8264\"\
+    \n  - username: supervisor\n    role: supervisor\n    departments: [\"*\"]\n \
+    \   password_hash: \"pbkdf2$50a2772ac9a3963d$3c36c41812bf08ddbce25f79e1b55677a5c195994fb90fb79869b83160c5ac74\"\
+    \n  - username: police_op\n    role: analyst\n    departments: [\"Police\"]\n\
+    \    password_hash: \"pbkdf2$5d788d22dc104aec$0a556c5ba639c0e4673462dcd67e038bb283f0b07800e61025f1fe34bd02fcdd\"\
+    \n  - username: muni_op\n    role: analyst\n    departments: [\"Municipal\"]\n\
+    \    password_hash: \"pbkdf2$73a5efcfc91ce725$49e1cc711ea208b29e0539f913180889c4cc41f13fa9189bd076f845f1927f8d\"\
+    \n  - username: viewer\n    role: viewer\n    departments: [\"*\"]\n    password_hash:\
+    \ \"pbkdf2$51c72a48886402ad$6ae2f902f3952db2c577568f0c2ad5ef91df7c000f91548de0f15080bc9fc021\"\
+    \n"
+  rules.yaml: "# Automatic event-tagging rules applied by the indexer.\nutc_offset_minutes:\
+    \ 330          # IST, used for time-of-day rules\nlow_confidence_below: 0.80 \
+    \      # tag reads below this mean character confidence\nfuzzy_watchlist_match:\
+    \ true      # alert on watchlist plates that differ by one OCR character (match=\"\
+    fuzzy\")\nrestricted_hours:\n  - camera: muni-cam2            # Bus Depot Exit:\
+    \ private vehicles not expected at night\n    from: \"23:00\"\n    to: \"05:00\"\
+    \n    tag: after_hours_depot\n  - camera: \"*\"\n    from: \"01:00\"\n    to:\
+    \ \"04:00\"\n    tag: night_movement\n\n# Non-standard plates (decorative fonts,\
+    \ stickers/emoji, hidden characters -> plate ends in \"????\"):\n# CMVR Rule 50/51\
+    \ require an HSRP plate in the prescribed font with no decorations.\n# Penalty:\
+    \ Motor Vehicles Act s.177 (general offence). Amounts are the 2019-amendment defaults;\n\
+    # confirm the current state notification with the traffic department before issuing.\n\
+    non_standard_plate:\n  challan: true\n  section: \"MV Act s.177 r/w CMVR Rule\
+    \ 50/51\"\n  fine_first_inr: 500\n  fine_repeat_inr: 1500\n  priority: medium\n\
+    \n# Video archive retention (object storage), in days, per department. Applied\
+    \ hourly by the archiver.\n#   recordings = continuous segments of recorded cameras,\
+    \ clips = per-event clips, crops = plate/frame images\n# events = plate-read metadata\
+    \ rows; audit = audit log (never below 180 days: CERT-In directions, 2022)\nretention:\n\
+    \  default: {recordings_days: 30, clips_days: 90, crops_days: 90, events_days:\
+    \ 365, audit_days: 365}\n  Police:  {recordings_days: 60}\n\n# Offence schedule\
+    \ for challan drafts. Sections per the Motor Vehicles Act 1988 as amended in 2019;\n\
+    # amounts are the central defaults and MUST be confirmed against the state notification\
+    \ with the\n# traffic department before anything is issued. `repeat_inr` applies\
+    \ when the plate already has an\n# approved challan for the same offence.\noffences:\n\
+    \  non_standard_plate: {section: \"s.177 r/w CMVR Rule 50/51\", fine_inr: 500,\
+    \ repeat_inr: 1500, priority: medium, challan: true}\n  over_speed:         {section:\
+    \ \"s.183(1)\", fine_inr: 1000, repeat_inr: 2000, priority: high, challan: true}\n\
+    \  wrong_way:          {section: \"s.184 (dangerous driving)\", fine_inr: 1000,\
+    \ repeat_inr: 5000, priority: high, challan: true}\n  red_light:          {section:\
+    \ \"s.184 / s.177\", fine_inr: 1000, repeat_inr: 5000, priority: high, challan:\
+    \ true}\n  no_helmet:          {section: \"s.194D\", fine_inr: 1000, repeat_inr:\
+    \ 1000, priority: medium, challan: true, note: \"plus 3 months licence disqualification\"\
+    }\n  triple_riding:      {section: \"s.194C\", fine_inr: 1000, repeat_inr: 1000,\
+    \ priority: medium, challan: true, note: \"plus 3 months licence disqualification\"\
+    }\n  illegal_parking:    {section: \"s.177 / s.122\", fine_inr: 500, repeat_inr:\
+    \ 1500, priority: low, challan: true}\n"
+  auth.yaml: "# Identity, MFA and access policy. Secrets come from environment variables\
+    \ (${VAR}).\n#\n# Providers are tried in order for a username/password login:\
+    \ local users.yaml first, then LDAP.\n# OIDC (Azure AD / ADFS / Keycloak / any\
+    \ OpenID Connect IdP; SAML-only IdPs are fronted by Keycloak)\n# is a browser\
+    \ redirect flow started from the login page's \"Sign in with <name>\" button.\n\
+    \nproviders:\n  local:\n    enabled: true                       # config/users.yaml\n\
+    \n  ldap:\n    enabled: false\n    server: ldaps://dc01.police.gov.in:636    \
+    \   # ldap:// or ldaps://\n    tls_verify: true\n    # How to bind as the user\
+    \ who is logging in. Active Directory accepts user@domain;\n    # OpenLDAP usually\
+    \ needs a DN template.\n    bind_template: \"{username}@police.gov.in\"    # or\
+    \ \"uid={username},ou=people,dc=example,dc=in\"\n    # Where to read the user's\
+    \ groups after a successful bind\n    base_dn: \"DC=police,DC=gov,DC=in\"\n  \
+    \  user_filter: \"(sAMAccountName={username})\"   # OpenLDAP: \"(uid={username})\"\
+    \n    group_attr: memberOf\n    # AD/LDAP group -> platform role + departments.\
+    \ First match wins; users in no listed group are refused.\n    group_map:\n  \
+    \    \"CN=CCTV-Admins,OU=Groups,DC=police,DC=gov,DC=in\":      {role: admin, departments:\
+    \ [\"*\"]}\n      \"CN=CCTV-Supervisors,OU=Groups,DC=police,DC=gov,DC=in\": {role:\
+    \ supervisor, departments: [\"Police\"]}\n      \"CN=CCTV-Operators,OU=Groups,DC=police,DC=gov,DC=in\"\
+    :   {role: analyst, departments: [\"Police\"]}\n      \"CN=CCTV-Viewers,OU=Groups,DC=police,DC=gov,DC=in\"\
+    :     {role: viewer, departments: [\"Police\"]}\n\n  oidc:\n    enabled: false\n\
+    \    name: \"State SSO\"\n    issuer: https://login.microsoftonline.com/<tenant-id>/v2.0\
+    \     # discovery at <issuer>/.well-known/openid-configuration\n    client_id:\
+    \ ${OIDC_CLIENT_ID:-}\n    client_secret: ${OIDC_CLIENT_SECRET:-}\n    redirect_uri:\
+    \ https://cctv.example.gov.in/api/auth/oidc/callback\n    scopes: [openid, profile,\
+    \ email]\n    username_claim: preferred_username\n    groups_claim: groups   \
+    \              # or \"roles\" for Azure app roles\n    group_map:            \
+    \               # same shape as ldap.group_map\n      \"cctv-admins\":     {role:\
+    \ admin, departments: [\"*\"]}\n      \"cctv-operators\":  {role: analyst, departments:\
+    \ [\"Police\"]}\n    # IdP-side MFA (Conditional Access etc.) is accepted as MFA\
+    \ when the token carries amr containing \"mfa\"\n    trust_idp_mfa: true\n\nmfa:\n\
+    \  # Roles that must have TOTP enrolled (Google/Microsoft Authenticator). Others\
+    \ may enrol voluntarily.\n  # Pilot default is empty so demo logins stay one-step;\
+    \ production: [admin, supervisor]\n  required_roles: []\n  issuer_name: \"Unified\
+    \ CCTV\"\n  grace_logins: 3        # logins allowed before enrolment is enforced\
+    \ for a required role\n\nbreak_glass:\n  enabled: true\n  roles: [supervisor,\
+    \ admin]         # who may invoke it\n  ttl_minutes: 60\n  grants: {departments:\
+    \ [\"*\"], features: [live, playback, export, plate_search, movement]}\n  notify_roles:\
+    \ [admin]              # get a live alert when it is used\n\nsession:\n  ttl_hours:\
+    \ 12\n  idle_minutes: 60\n"
+  analytics.yaml: "# Analytics beyond ANPR. Per-camera traffic rules (evaluated on\
+    \ every plate read by the indexer)\n# and zone analytics (evaluated by the analytics\
+    \ worker on sampled frames).\n#\n# Polygons are in normalised frame coordinates\
+    \ [x, y] with 0..1 from top-left, so they survive a\n# change of stream resolution.\
+    \ Hours are \"HH:MM-HH:MM\" local (IST) and may wrap midnight.\n#\n# Wide junction\
+    \ cameras (a whole crossing in one frame) cannot read plates, but they count well:\n\
+    #   tiles: 2        run the vehicle detector on 2x2 overlapping tiles as well\
+    \ as the whole frame (3-5x more\n#                   small vehicles found on a\
+    \ 1080p overview; costs ~5x CPU per frame, fine at 1-2 fps)\n#   traffic:    \
+    \    vehicles in view by type per minute, peak, and (with `line`) how many crossed\
+    \ a line\n#                   in each direction. Results: Violations tab -> Traffic,\
+    \ /api/traffic.\n\ncameras:\n  cam01:                             # Chiman bhai\
+    \ Bridge: wide overview, too far for plates -> counting\n    tiles: 2\n    traffic:\n\
+    \      window_s: 60\n      line: [[0.30, 0.62], [0.72, 0.62]]      # count line\
+    \ across the carriageway (fractions of the frame)\n  cam02:                  \
+    \           # Janpath: junction overview\n    tiles: 2\n    traffic: {window_s:\
+    \ 60}\n    crowd:\n      polygon: [[0.0, 0.35], [1.0, 0.35], [1.0, 1.0], [0.0,\
+    \ 1.0]]\n      max_persons: 25\n  cam12:                             # Adalaj\
+    \ toll naka: vehicles come towards the camera, plates readable\n    allowed_direction:\
+    \ towards\n    tiles: 2\n    traffic: {window_s: 60}\n  cam14:               \
+    \              # Delight RLVD: red-light camera; configure the signal head once\
+    \ seen\n    allowed_direction: towards\n    # red_light:\n    #   stop_line_y:\
+    \ 0.70\n    #   signal: {mode: roi, roi: [0.90, 0.05, 0.98, 0.20]}\n  cam17: \
+    \                            # Rajkot Bus Port: counting + no-parking in front\
+    \ of the gate\n    tiles: 2\n    traffic: {window_s: 60}\n\npairs: []        \
+    \                    # add {from, to, distance_m, limit_kmh, max_minutes} for\
+    \ over-speed between two ANPR cameras\n\nsampling_fps: 1.5                   \
+    \ # frames per second per analytics camera (tiles cost ~5x per frame)\n\nface_search:\n\
+    \  enabled: false\n  legal_clearance_ref: \"\"\n"
+  hotlists.yaml: 'sources: []
+
+    '
+  notify.yaml: "# Notification channels and routing. Secrets via ${ENV}. Every attempt\
+    \ is logged (Admin → Notifications).\n#\n# Channel types:\n#   email     SMTP\
+    \ (host, port, tls, user, password, from)\n#   sms       any HTTP SMS gateway:\
+    \ url, method, headers, body template with {to} and {text}\n#             (works\
+    \ with Twilio-compatible and Indian DLT gateways that accept JSON)\n#   whatsapp\
+    \  same shape; example below is the WhatsApp Cloud API text message\n#   webhook\
+    \   signed JSON POST (X-UVP-Signature = HMAC-SHA256 of the body) - e.g. Dial-112\
+    \ / CAD intake\n#   voice     automated phone call through a BulkOBD-compatible\
+    \ outbound dialer (POST <url>/voiceBlast):\n#             url (base URL of the\
+    \ dialer), username/password (dialer account), language (\"1\"), max_call_s,\n\
+    #             ack_digit (\"1\" = the call asks to press 1; the dialer's result\
+    \ webhook then acknowledges the alert),\n#             sound_id (play a pre-recorded\
+    \ clip uploaded on the dialer panel instead of text-to-speech),\n#           \
+    \  caller_id, retries, retry_after. Result webhook: <server>/api/integrations/voice/callback?key=${VOICE_CALLBACK_KEY}\n\
+    channels:\n  control_room_email:\n    type: email\n    enabled: false\n    host:\
+    \ smtp.example.gov.in\n    port: 587\n    tls: true\n    user: ${SMTP_USER:-}\n\
+    \    password: ${SMTP_PASS:-}\n    from: cctv-alerts@example.gov.in\n  sms_gateway:\n\
+    \    type: sms\n    enabled: false\n    url: https://sms.example.in/api/send\n\
+    \    method: POST\n    headers: {Authorization: \"Bearer ${SMS_API_KEY:-}\"}\n\
+    \    body: {sender: \"CCTVPL\", to: \"{to}\", message: \"{text}\"}\n  whatsapp_cloud:\n\
+    \    type: whatsapp\n    enabled: false\n    url: https://graph.facebook.com/v19.0/${WA_PHONE_ID:-0}/messages\n\
+    \    headers: {Authorization: \"Bearer ${WA_TOKEN:-}\"}\n    body: {messaging_product:\
+    \ whatsapp, to: \"{to}\", type: text, text: {body: \"{text}\"}}\n  voice_call:\n\
+    \    type: voice\n    enabled: false\n    url: ${VOICE_OBD_URL:-http://180.150.248.111:8096/OBDSEA}\n\
+    \    username: ${VOICE_OBD_USER:-}\n    password: ${VOICE_OBD_PASS:-}\n    caller_id:\
+    \ ${VOICE_OBD_DNID:-NA}     # the DNID (caller number) the provider assigned to\
+    \ your account\n    language: ${VOICE_OBD_LANG:-1}       # TTS language code on\
+    \ the dialer panel (1 = default; try 2.. if the call is silent)\n    # tts: local\
+    \                         # local (default): speak with espeak-ng, upload the\
+    \ MP3, play by soundId -\n    #                                    #   works even\
+    \ when the dialer's own TTS is silent; \"dialer\" = use the dialer's TTS\n   \
+    \ # voice: en-us                       # espeak-ng voice for local TTS (en-us,\
+    \ en-gb, hi ...); speed: 150\n    # clip_format: wav                   # wav (8\
+    \ kHz PCM, telephony default) | mp3 (44.1 kHz) - whichever the dialer plays\n\
+    \    # format: form                       # form (default, what the dialer accepts\
+    \ for TTS) | json\n    max_call_s: 45\n    ack_digit: \"1\"\n    retries: 1\n\
+    \    retry_after: \"00:01:00\"\n  dial112_cad:\n    type: webhook\n    enabled:\
+    \ false\n    url: https://cad.example.gov.in/api/cctv-events\n    secret: ${CAD_WEBHOOK_SECRET:-}\n\
+    \n# Routes: which events go where. kind: alert | incident | camera.health | break_glass\
+    \ | *\n# Optional filters: priority (string or list), departments (list), subkind\
+    \ (alert match \"exact\"/\"fuzzy\"/\"rule\",\n# incident kind, or the offence\
+    \ code in watchlist_plate e.g. OVER_SPEED).\nroutes:\n  - {kind: alert, subkind:\
+    \ exact, priority: high, channel: sms_gateway, to: [\"+919999999999\"]}\n  - {kind:\
+    \ alert, subkind: exact, channel: dial112_cad}\n  # phone the duty officer for\
+    \ high-priority watchlist hits (press 1 on the call = acknowledged)\n  - {kind:\
+    \ alert, subkind: exact, priority: high, channel: voice_call, to: [\"+919999999999\"\
+    ]}\n  - {kind: incident, priority: high, channel: whatsapp_cloud, to: [\"+919999999999\"\
+    ]}\n  - {kind: camera.health, channel: control_room_email, to: [\"noc@example.gov.in\"\
+    ]}\n  - {kind: break_glass, channel: control_room_email, to: [\"security-admin@example.gov.in\"\
+    ]}\n  # weekly ANPR accuracy report (written every Monday by the archiver) - kind\
+    \ \"report\"\n  - {kind: report, channel: control_room_email, to: [\"cctv-lead@example.gov.in\"\
+    ]}\n"
+  tenants.yaml: "# Multi-tenancy: one deployment serving several cities / authorities.\
+    \ A tenant is a named set of\n# departments with its own branding; users, API\
+    \ keys and cases are scoped to their tenant's departments.\n# The special tenant\
+    \ \"central\" sees everything (state-level control room). Users pick up their\
+    \ tenant from\n# users.yaml (`tenant:`), the LDAP/OIDC group map (`tenant:`),\
+    \ or default to the tenant that owns their\n# departments.\ntenants:\n  - id:\
+    \ central\n    name: State Command Centre\n    departments: [\"*\"]\n  - id: city-a\n\
+    \    name: City A Smart City SPV\n    departments: [Police, Municipal]\n    branding:\
+    \ {title: \"City A CCTV\", accent: \"#3b82f6\"}\n  - id: city-b\n    name: City\
+    \ B Police Commissionerate\n    departments: [Traffic]\n    branding: {title:\
+    \ \"City B Traffic Command\", accent: \"#f59e0b\"}\n"
+  vendors.yaml: "# Vendor presets for departmental systems. A source in sources.yaml\
+    \ can say `vendor: hikvision` and only\n# fill in host / credentials / channels;\
+    \ the preset supplies the adapter and its endpoints.\n#\n# These are built from\
+    \ the vendors' public documentation and the platform's own ONVIF / RTSP support.\n\
+    # They have NOT been verified against every firmware; treat each as a starting\
+    \ point and confirm with the\n# vendor's integration guide. Where a VMS speaks\
+    \ ONVIF Profile S/T, `onvif` is the safest choice.\npresets:\n  hikvision:   \
+    \           # NVR / DVR / cameras (ISAPI); streams via standard RTSP paths\n \
+    \   adapter: rtsp_template\n    onvif_port: 80\n    main: \"rtsp://{host}:{rtsp_port}/Streaming/Channels/{channel}01\"\
+    \n    sub:  \"rtsp://{host}:{rtsp_port}/Streaming/Channels/{channel}02\"\n   \
+    \ notes: \"Enable RTSP + ONVIF under Network > Advanced > Integration Protocol;\
+    \ create a viewer-level user.\"\n  dahua:\n    adapter: rtsp_template\n    onvif_port:\
+    \ 80\n    main: \"rtsp://{host}:{rtsp_port}/cam/realmonitor?channel={channel}&subtype=0\"\
+    \n    sub:  \"rtsp://{host}:{rtsp_port}/cam/realmonitor?channel={channel}&subtype=1\"\
+    \n    notes: \"Same paths for CP Plus (Dahua OEM). ONVIF on port 80 by default.\"\
+    \n  cpplus:\n    extends: dahua\n  uniview:\n    adapter: rtsp_template\n    onvif_port:\
+    \ 80\n    main: \"rtsp://{host}:{rtsp_port}/unicast/c{channel}/s0/live\"\n   \
+    \ sub:  \"rtsp://{host}:{rtsp_port}/unicast/c{channel}/s1/live\"\n  axis:\n  \
+    \  adapter: rtsp_template\n    onvif_port: 80\n    main: \"rtsp://{host}:{rtsp_port}/axis-media/media.amp?camera={channel}&streamprofile=Quality\"\
+    \n    sub:  \"rtsp://{host}:{rtsp_port}/axis-media/media.amp?camera={channel}&streamprofile=Balanced\"\
+    \n  honeywell:\n    adapter: onvif\n    onvif_port: 80\n    notes: \"Honeywell\
+    \ MAXPRO / Performance Series NVRs expose ONVIF Profile S; use the onvif adapter.\"\
+    \n  bosch:\n    adapter: onvif\n    onvif_port: 80\n    notes: \"Bosch cameras\
+    \ / DIVAR expose ONVIF; BVMS itself is reached through its Video SDK (sdk_bridge).\"\
+    \n  milestone:              # XProtect API Gateway (2022 R2+): OAuth password\
+    \ grant, REST cameras, RTSP via Mobile Server or direct\n    adapter: vendor_rest\n\
+    \    api:\n      login_path: /IDP/connect/token\n      login_mode: form\n    \
+    \  login_body: {grant_type: password, username: \"{user}\", password: \"{password}\"\
+    , client_id: GrantValidatorClient}\n      token_field: access_token\n      cameras_path:\
+    \ /api/rest/v1/cameras\n      cameras_list_field: array\n      id_field: id\n\
+    \      name_field: name\n      online_field: enabled\n      online_value: \"True\"\
+    \n      stream_template: \"rtsp://{host}:554/live/{id}\"      # Milestone RTSP\
+    \ on the Recording Server (enable in Management Client)\n      profiles: {main:\
+    \ main}\n      stream_needs_credentials: true\n    notes: \"Base URL = https://<api-gateway-host>/.\
+    \ RTSP via the XProtect RTSP service or ONVIF Bridge.\"\n  genetec:          \
+    \      # Security Center Web SDK (basic auth, JSON with format=json)\n    adapter:\
+    \ vendor_rest\n    api:\n      login_path: \"\"\n      api_key_header: Authorization\n\
+    \      api_key_value: \"Basic {basic}\"                       # {basic} = base64(user;appid:password),\
+    \ see docs\n      cameras_path: /WebSdk/report/EntityConfiguration?q=EntityTypes@Camera,Name,RunningState&format=json\n\
+    \      cameras_list_field: Rsp.Result\n      id_field: Guid\n      name_field:\
+    \ Name\n      online_field: RunningState\n      online_value: Running\n      stream_template:\
+    \ \"rtsp://{host}:554/{id}\"           # Genetec Media Gateway RTSP\n      profiles:\
+    \ {main: main}\n      stream_needs_credentials: true\n    notes: \"Requires a\
+    \ Web SDK licence and a Media Gateway role; the app id is part of the basic credential.\"\
+    \n"
+  mediamtx.yml: "# Platform stream relay (MediaMTX).\n# - Pulls each departmental\
+    \ stream ONCE (on demand) and re-serves it to any number\n#   of operators over\
+    \ WebRTC (<1 s) or HLS (fallback), and to ANPR workers over RTSP.\n# - Paths are\
+    \ created at runtime by the adapter service through the control API.\n# - Every\
+    \ read/publish/API request is authorised by the platform API\n#   (/internal/relay-auth),\
+    \ which checks the viewer's token, department rights and\n#   the per-source concurrent-pull\
+    \ cap.\nlogLevel: info\nwriteQueueSize: 4096\napi: yes\napiAddress: :9997\nmetrics:\
+    \ yes\nmetricsAddress: :9998\n\nrtspAddress: :8554\nrtpAddress: :8000\nrtcpAddress:\
+    \ :8001\nrtspTransports: [tcp]\nrtmp: no\nsrt: no\n\nwebrtc: yes\nwebrtcAddress:\
+    \ :8889\nwebrtcAllowOrigin: '*'\nwebrtcLocalUDPAddress: :8189\nwebrtcLocalTCPAddress:\
+    \ :8189      # ICE over TCP as well: cloud / corporate networks often block UDP\n\
+    webrtcIPsFromInterfaces: yes\n# webrtcAdditionalHosts: [command-centre.example.gov.in]\n\
+    \nhls: yes\nhlsAddress: :8888\nhlsAllowOrigin: '*'\nhlsVariant: mpegts\nhlsSegmentCount:\
+    \ 5\nhlsSegmentDuration: 1s\nhlsAlwaysRemux: no\n\n# Recording + playback (video\
+    \ archive). Recorded paths are chosen by the adapter service\n# (RECORD_MODE /\
+    \ per-source `record:`); segments land on the relay's local disk as a short\n\
+    # buffer and the archiver service copies them to object storage. The playback\
+    \ server cuts\n# event clips out of the buffered segments for the archiver.\n\
+    playback: yes\nplaybackAddress: :9996\n\nauthMethod: http\nauthHTTPAddress: http://127.0.0.1:8000/internal/relay-auth\
+    \   # override: MTX_AUTHHTTPADDRESS\nauthHTTPExclude:\n  - action: metrics\n \
+    \ - action: pprof\n\npathDefaults:\n  rtspTransport: tcp\n  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f\
+    \     # override: MTX_PATHDEFAULTS_RECORDPATH\n  recordFormat: fmp4\n  recordPartDuration:\
+    \ 1s\n  recordSegmentDuration: 60s\n  recordDeleteAfter: 6h\n  # sourceOnDemand\
+    \ / close-after are set per camera path by the adapter service\n\npaths:\n  #\
+    \ Browser compatibility transcode for sources the browser cannot decode (H.265\
+    \ / HEVC, MPEG-4,\n  # MJPEG): \"<camera>/<profile>-h264\" is started on demand\
+    \ when the console's WebRTC offer is\n  # rejected with \"codecs not supported\"\
+    . Reads the platform's own relay path, so the departmental\n  # source is still\
+    \ pulled only once; recording and the ANPR / analytics workers keep the original.\n\
+    \  # ~1 CPU core per 1080p stream (libx264 veryfast); only viewers' cameras are\
+    \ transcoded.\n  # NOTE: MediaMTX runs this without a shell: no ${VAR:-default}\
+    \ expansion, only its own $MTX_PATH / $G1 / $RTSP_PORT.\n  \"~^([^/]+)/(main|sub)-h264$\"\
+    :\n    source: publisher\n    runOnDemand: >-\n      ffmpeg -loglevel error -rtsp_transport\
+    \ tcp -fflags nobuffer -flags low_delay\n      -i rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/${G1}/${G2}\n\
+    \      -an -c:v libx264 -preset veryfast -tune zerolatency -profile:v baseline\
+    \ -pix_fmt yuv420p\n      -b:v 2500k -maxrate 2500k -bufsize 1500k -g 30 -bf 0\n\
+    \      -f rtsp rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/$MTX_PATH\n\
+    \    runOnDemandRestart: yes\n    runOnDemandStartTimeout: 20s\n    runOnDemandCloseAfter:\
+    \ 10s\n\n  # Compatibility transcode, only started when a browser without H.264\
+    \ (some Linux Chromium\n  # builds) asks for \"<camera>/<profile>-vp8\". Reads\
+    \ the platform's own relay path, so the\n  # departmental source is still pulled\
+    \ only once.\n  \"~^([^/]+)/(main|sub)-vp8$\":\n    source: publisher\n    runOnDemand:\
+    \ >-\n      ffmpeg -loglevel error -rtsp_transport tcp\n      -i rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/${G1}/${G2}\n\
+    \      -an -c:v libvpx -deadline realtime -cpu-used 8 -b:v 700k -g 30 -vf scale=-2:360\n\
+    \      -f rtsp rtsp://${RELAY_INTERNAL_USER}:${RELAY_INTERNAL_PASS}@127.0.0.1:$RTSP_PORT/$MTX_PATH\n\
+    \    runOnDemandRestart: yes\n    runOnDemandStartTimeout: 20s\n    runOnDemandCloseAfter:\
+    \ 10s\n"

@@ -1,0 +1,23 @@
+# Pilot users (local provider). Production: enable LDAP/AD or OIDC in config/auth.yaml. Hash: python -m uvp.auth <password>
+# Demo passwords: admin/admin123 supervisor/super123 police_op/police123 muni_op/muni123 viewer/viewer123
+users:
+  - username: admin
+    role: admin
+    departments: ["*"]
+    password_hash: "pbkdf2$4092307e751b30de$f4a84c96d4c6e5b88a6dbf81aecde0f5265e70b0dbacf5d993c6b84de56b8264"
+  - username: supervisor
+    role: supervisor
+    departments: ["*"]
+    password_hash: "pbkdf2$50a2772ac9a3963d$3c36c41812bf08ddbce25f79e1b55677a5c195994fb90fb79869b83160c5ac74"
+  - username: police_op
+    role: analyst
+    departments: ["Police"]
+    password_hash: "pbkdf2$5d788d22dc104aec$0a556c5ba639c0e4673462dcd67e038bb283f0b07800e61025f1fe34bd02fcdd"
+  - username: muni_op
+    role: analyst
+    departments: ["Municipal"]
+    password_hash: "pbkdf2$73a5efcfc91ce725$49e1cc711ea208b29e0539f913180889c4cc41f13fa9189bd076f845f1927f8d"
+  - username: viewer
+    role: viewer
+    departments: ["*"]
+    password_hash: "pbkdf2$51c72a48886402ad$6ae2f902f3952db2c577568f0c2ad5ef91df7c000f91548de0f15080bc9fc021"

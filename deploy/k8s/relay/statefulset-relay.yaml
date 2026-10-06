@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: relay
+  namespace: unified-cctv
+spec:
+  serviceName: relay
+  replicas: 2
+  selector:
+    matchLabels:
+      app: relay
+  template:
+    metadata:
+      labels:
+        app: relay
+    spec:
+      containers:
+      - name: mediamtx
+        image: docker.io/bluenviron/mediamtx:1.15.1-ffmpeg
+        env:
+        - name: MTX_AUTHHTTPADDRESS
+          value: http://api:8000/internal/relay-auth
+        - name: TZ
+          value: UTC
+        - name: MTX_PATHDEFAULTS_RECORDPATH
+          value: /recordings/$(POD_NAME)/%path/%Y-%m-%d_%H-%M-%S-%f
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        - name: RELAY_INTERNAL_PASS
+          value: change-me-relay
+        ports:
+        - containerPort: 8554
+        - containerPort: 8889
+        - containerPort: 8888
+        - containerPort: 9997
+        - containerPort: 9996
+        - containerPort: 9998
+        - containerPort: 8189
+          protocol: UDP
+        - containerPort: 8189
+          protocol: TCP
+        volumeMounts:
+        - name: config
+          mountPath: /mediamtx.yml
+          subPath: mediamtx.yml
+        - name: recordings
+          mountPath: /recordings
+        resources:
+          requests:
+            cpu: '1'
+            memory: 1Gi
+          limits:
+            cpu: '4'
+            memory: 4Gi
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull

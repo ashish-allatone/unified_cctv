@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: anpr
+  namespace: unified-cctv
+spec:
+  clusterIP: None
+  selector:
+    app: anpr
+  ports:
+  - port: 9100

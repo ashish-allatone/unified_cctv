@@ -1,0 +1,44 @@
+# Automatic event-tagging rules applied by the indexer.
+utc_offset_minutes: 330          # IST, used for time-of-day rules
+low_confidence_below: 0.80       # tag reads below this mean character confidence
+fuzzy_watchlist_match: true      # alert on watchlist plates that differ by one OCR character (match="fuzzy")
+restricted_hours:
+  - camera: muni-cam2            # Bus Depot Exit: private vehicles not expected at night
+    from: "23:00"
+    to: "05:00"
+    tag: after_hours_depot
+  - camera: "*"
+    from: "01:00"
+    to: "04:00"
+    tag: night_movement
+
+# Non-standard plates (decorative fonts, stickers/emoji, hidden characters -> plate ends in "????"):
+# CMVR Rule 50/51 require an HSRP plate in the prescribed font with no decorations.
+# Penalty: Motor Vehicles Act s.177 (general offence). Amounts are the 2019-amendment defaults;
+# confirm the current state notification with the traffic department before issuing.
+non_standard_plate:
+  challan: true
+  section: "MV Act s.177 r/w CMVR Rule 50/51"
+  fine_first_inr: 500
+  fine_repeat_inr: 1500
+  priority: medium
+
+# Video archive retention (object storage), in days, per department. Applied hourly by the archiver.
+#   recordings = continuous segments of recorded cameras, clips = per-event clips, crops = plate/frame images
+# events = plate-read metadata rows; audit = audit log (never below 180 days: CERT-In directions, 2022)
+retention:
+  default: {recordings_days: 30, clips_days: 90, crops_days: 90, events_days: 365, audit_days: 365}
+  Police:  {recordings_days: 60}
+
+# Offence schedule for challan drafts. Sections per the Motor Vehicles Act 1988 as amended in 2019;
+# amounts are the central defaults and MUST be confirmed against the state notification with the
+# traffic department before anything is issued. `repeat_inr` applies when the plate already has an
+# approved challan for the same offence.
+offences:
+  non_standard_plate: {section: "s.177 r/w CMVR Rule 50/51", fine_inr: 500, repeat_inr: 1500, priority: medium, challan: true}
+  over_speed:         {section: "s.183(1)", fine_inr: 1000, repeat_inr: 2000, priority: high, challan: true}
+  wrong_way:          {section: "s.184 (dangerous driving)", fine_inr: 1000, repeat_inr: 5000, priority: high, challan: true}
+  red_light:          {section: "s.184 / s.177", fine_inr: 1000, repeat_inr: 5000, priority: high, challan: true}
+  no_helmet:          {section: "s.194D", fine_inr: 1000, repeat_inr: 1000, priority: medium, challan: true, note: "plus 3 months licence disqualification"}
+  triple_riding:      {section: "s.194C", fine_inr: 1000, repeat_inr: 1000, priority: medium, challan: true, note: "plus 3 months licence disqualification"}
+  illegal_parking:    {section: "s.177 / s.122", fine_inr: 500, repeat_inr: 1500, priority: low, challan: true}

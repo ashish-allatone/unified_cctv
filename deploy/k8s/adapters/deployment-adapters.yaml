@@ -1,0 +1,138 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adapters
+  namespace: unified-cctv
+  labels:
+    app: adapters
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: adapters
+  template:
+    metadata:
+      labels:
+        app: adapters
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9100'
+    spec:
+      containers:
+      - name: adapters
+        image: bom.ocir.io/bmpirqtfolte/uvp-platform:31
+        command:
+        - python
+        - -m
+        - uvp.services.adapter_service
+        env:
+        - name: BUS
+          value: kafka
+        - name: KAFKA_BOOTSTRAP
+          value: kafka-0.kafka.unified-cctv.svc.cluster.local:9092
+        - name: ES_URL
+          value: http://elasticsearch.unified-cctv.svc.cluster.local:9200
+        - name: API_URL
+          value: http://api:8000
+        - name: RELAY_APIS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9997,relay-1=http://relay-1.relay.unified-cctv.svc:9997
+        - name: RELAY_RTSPS
+          value: relay-0=rtsp://relay-0.relay.unified-cctv.svc:8554,relay-1=rtsp://relay-1.relay.unified-cctv.svc:8554
+        - name: RELAY_PLAYBACKS
+          value: relay-0=http://relay-0.relay.unified-cctv.svc:9996,relay-1=http://relay-1.relay.unified-cctv.svc:9996
+        - name: RELAY_PUBLIC_HOSTS
+          value: relay-0=cctv.example.gov.in,relay-1=cctv.example.gov.in
+        - name: RELAY_PUBLIC_BASE
+          value: https://cctv.example.gov.in/relay
+        - name: DATA_DIR
+          value: /data
+        - name: RECORDINGS_DIR
+          value: /recordings
+        - name: OBJECT_STORAGE
+          value: s3
+        - name: S3_ENDPOINT
+          value: https://NAMESPACE.compat.objectstorage.ap-mumbai-1.oraclecloud.com
+        - name: S3_REGION
+          value: ap-mumbai-1
+        - name: S3_BUCKET
+          value: uvp-video
+        - name: S3_PATH_STYLE
+          value: '1'
+        - name: S3_SSE
+          value: AES256
+        - name: PII_BLUR_FACES
+          value: '1'
+        - name: METRICS_PORT
+          value: '9100'
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: DATABASE_URL
+        - name: TOKEN_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: token-secret
+        - name: INTERNAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: internal-secret
+        - name: RELAY_INTERNAL_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: relay-internal-pass
+        - name: S3_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-access-key
+        - name: S3_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: s3-secret-key
+        - name: POLICE_ONVIF_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: police-onvif-pass
+        - name: MUNI_API_PASS
+          valueFrom:
+            secretKeyRef:
+              name: uvp-secrets
+              key: muni-api-pass
+        - name: RELAY_INTERNAL_USER
+          value: uvp-internal
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 250m
+            memory: 512Mi
+        ports:
+        - containerPort: 9100
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: recordings
+          mountPath: /recordings
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: uvp-config
+      - name: data
+        persistentVolumeClaim:
+          claimName: uvp-data
+      - name: recordings
+        persistentVolumeClaim:
+          claimName: uvp-recordings
+      imagePullSecrets:
+      - name: ocir-pull

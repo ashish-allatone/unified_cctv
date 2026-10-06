@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: relay
+  namespace: unified-cctv
+spec:
+  clusterIP: None
+  selector:
+    app: relay
+  ports:
+  - name: rtsp
+    port: 8554
+  - name: whep
+    port: 8889
+  - name: hls
+    port: 8888
+  - name: api
+    port: 9997
+  - name: playback
+    port: 9996
+  - name: metrics
+    port: 9998

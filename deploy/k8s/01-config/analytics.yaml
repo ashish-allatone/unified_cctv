@@ -1,0 +1,44 @@
+# Analytics beyond ANPR. Per-camera traffic rules (evaluated on every plate read by the indexer)
+# and zone analytics (evaluated by the analytics worker on sampled frames).
+#
+# Polygons are in normalised frame coordinates [x, y] with 0..1 from top-left, so they survive a
+# change of stream resolution. Hours are "HH:MM-HH:MM" local (IST) and may wrap midnight.
+#
+# Wide junction cameras (a whole crossing in one frame) cannot read plates, but they count well:
+#   tiles: 2        run the vehicle detector on 2x2 overlapping tiles as well as the whole frame (3-5x more
+#                   small vehicles found on a 1080p overview; costs ~5x CPU per frame, fine at 1-2 fps)
+#   traffic:        vehicles in view by type per minute, peak, and (with `line`) how many crossed a line
+#                   in each direction. Results: Violations tab -> Traffic, /api/traffic.
+
+cameras:
+  cam01:                             # Chiman bhai Bridge: wide overview, too far for plates -> counting
+    tiles: 2
+    traffic:
+      window_s: 60
+      line: [[0.30, 0.62], [0.72, 0.62]]      # count line across the carriageway (fractions of the frame)
+  cam02:                             # Janpath: junction overview
+    tiles: 2
+    traffic: {window_s: 60}
+    crowd:
+      polygon: [[0.0, 0.35], [1.0, 0.35], [1.0, 1.0], [0.0, 1.0]]
+      max_persons: 25
+  cam12:                             # Adalaj toll naka: vehicles come towards the camera, plates readable
+    allowed_direction: towards
+    tiles: 2
+    traffic: {window_s: 60}
+  cam14:                             # Delight RLVD: red-light camera; configure the signal head once seen
+    allowed_direction: towards
+    # red_light:
+    #   stop_line_y: 0.70
+    #   signal: {mode: roi, roi: [0.90, 0.05, 0.98, 0.20]}
+  cam17:                             # Rajkot Bus Port: counting + no-parking in front of the gate
+    tiles: 2
+    traffic: {window_s: 60}
+
+pairs: []                            # add {from, to, distance_m, limit_kmh, max_minutes} for over-speed between two ANPR cameras
+
+sampling_fps: 1.5                    # frames per second per analytics camera (tiles cost ~5x per frame)
+
+face_search:
+  enabled: false
+  legal_clearance_ref: ""
