@@ -189,9 +189,10 @@ def speak_text(kind: str, payload: dict) -> str:
     return " ".join(txt.split())[:300]
 
 
-def _tts_mp3(text: str, ch: dict) -> bytes | None:
-    """Speak `text` with the local espeak-ng voice and return MP3 bytes (8 kHz mono, telephony quality).
-    Used when the dialer's own text-to-speech is unavailable ("local" TTS). None when espeak-ng / ffmpeg are missing."""
+def _tts_mp3(text: str, ch: dict, fmt: str | None = None) -> bytes | None:
+    """Speak `text` with the local espeak-ng voice and return the clip bytes: WAV (8 kHz 16-bit mono, telephony) by
+    default or MP3 (44.1 kHz 128k) with clip_format: mp3. Used when the dialer's own text-to-speech is unavailable
+    ("local" TTS). None when espeak-ng / ffmpeg are missing."""
     import shutil
     import subprocess
     import tempfile
@@ -201,7 +202,7 @@ def _tts_mp3(text: str, ch: dict) -> bytes | None:
     speed = str(ch.get("speed") or 150)
     with tempfile.TemporaryDirectory() as d:
         wav, out = f"{d}/say.wav", f"{d}/say.out"
-        fmt = str(ch.get("clip_format") or "wav").lower()        # wav = 8 kHz 16-bit PCM mono (telephony); mp3 = 44.1 kHz 128k
+        fmt = str(fmt or ch.get("clip_format") or "wav").lower()
         try:
             subprocess.run(["espeak-ng", "-v", voice, "-s", speed, "-p", "45", "-a", "180", "-g", "6", "-w", wav, text], check=True, timeout=30, capture_output=True)
             if fmt == "mp3":
@@ -214,13 +215,31 @@ def _tts_mp3(text: str, ch: dict) -> bytes | None:
             return None
 
 
+def _server_error_text(text: str) -> str:
+    """Turn a Tomcat / Spring HTML error page into its one-line message ('HTTP Status 500 - ... Message ...')."""
+    import html
+    import re
+    t = text or ""
+    if "<html" not in t.lower():
+        return " ".join(t.split())[:200]
+    bits = []
+    for key in ("message", "description", "exception"):
+        m = re.search(rf"<b>\s*{key}\s*</b>\s*(?:<u>)?\s*(.*?)\s*(?:</u>)?\s*</p>", t, flags=re.I | re.S)
+        if m and re.sub("<[^>]+>", "", m.group(1)).strip():
+            bits.append(f"{key}: " + " ".join(html.unescape(re.sub('<[^>]+>', '', m.group(1))).split()))
+    if not bits:
+        m = re.search(r"<h1>(.*?)</h1>", t, flags=re.I | re.S)
+        bits.append(" ".join(re.sub("<[^>]+>", "", m.group(1)).split()) if m else "server error page")
+    return "; ".join(bits)[:200]
+
+
 def _upload_sound(ch: dict, base: str, data: bytes, name: str) -> int:
     """POST /uploadSound (multipart) -> soundId. Response shape is not documented, so any integer-ish id field is accepted."""
     ext, ctype = ("mp3", "audio/mpeg") if data[:3] == b"ID3" or data[:2] == b"\xff\xfb" else ("wav", "audio/wav")
     r = requests.post(f"{base}/uploadSound", data={"username": ch["username"], "password": ch.get("password", ""), "soundName": name},
                       files={"file": (f"{name}.{ext}", data, ctype)}, headers=ch.get("headers") or {}, timeout=60)
     if not r.ok:
-        raise RuntimeError(f"uploadSound HTTP {r.status_code}: {r.text[:200]}")
+        raise RuntimeError(f"uploadSound HTTP {r.status_code} ({ext}, {len(data) // 1024} KB): {_server_error_text(r.text)}")
     try:
         j = json.loads(r.text or "{}")
     except ValueError:
@@ -249,6 +268,64 @@ def _upload_sound(ch: dict, base: str, data: bytes, name: str) -> int:
     raise RuntimeError(f"uploadSound: no soundId in reply {r.text[:160]!r}")
 
 
+_SOUND_CACHE_KEY = "voice_sounds"
+
+
+def _cached_sound(base: str, text: str) -> tuple[str, int | None]:
+    """Clips are uploaded once per sentence: the dialer keeps them, we keep the id (settings voice_sounds)."""
+    key = hashlib.sha1(f"{base}|{text}".encode()).hexdigest()[:16]
+    try:
+        from .db import get_setting
+        with SessionLocal() as s:
+            v = (get_setting(s, _SOUND_CACHE_KEY, {}) or {}).get(key)
+            return key, int(v["id"]) if isinstance(v, dict) and v.get("id") else None
+    except Exception:  # noqa: BLE001
+        return key, None
+
+
+def _remember_sound(key: str, sound: int, text: str) -> None:
+    try:
+        from .db import get_setting, set_setting
+        with SessionLocal() as s:
+            d = dict(get_setting(s, _SOUND_CACHE_KEY, {}) or {})
+            d[key] = {"id": int(sound), "text": text[:120], "at": utcnow().isoformat()}
+            if len(d) > 500:                                # keep the newest 500 sentences
+                for k in sorted(d, key=lambda k: d[k].get("at", ""))[: len(d) - 500]:
+                    d.pop(k, None)
+            set_setting(s, _SOUND_CACHE_KEY, d, "voice")
+            s.commit()
+    except Exception:  # noqa: BLE001
+        log.exception("could not remember voice clip id")
+
+
+def _local_clip(ch: dict, base: str, text: str, nid: str) -> tuple[int | None, str]:
+    """Speak `text` locally and upload it (or reuse the clip uploaded for the same sentence earlier).
+    Tries the configured clip format first (wav 8 kHz), then the other one (mp3) when the dialer's upload service
+    fails - its Tomcat answers a bare HTTP 500 for a format or size it does not like. Returns (soundId, note)."""
+    key, cached = _cached_sound(base, text)
+    if cached:
+        return cached, f" (voice clip, sound {cached}, reused)"
+    first = str(ch.get("clip_format") or "wav").lower()
+    fmts = [first] + [f for f in ("wav", "mp3") if f != first]
+    digits = "".join(c for c in nid if c.isalnum())[:12] or "clip"
+    errors = []
+    for i, fmt in enumerate(fmts):
+        data = _tts_mp3(text, ch, fmt)
+        if not data:
+            return None, " (local TTS unavailable; dialer TTS)"
+        for name in (f"uvp{digits}", f"uvp{digits}{fmt}"):
+            try:
+                sound = _upload_sound(ch, base, data, name)
+                _remember_sound(key, sound, text)
+                return sound, f" (local voice clip, sound {sound}{'' if i == 0 else ', ' + fmt})"
+            except Exception as e:  # noqa: BLE001
+                errors.append(str(e)[:160])
+                log.warning("voice clip upload failed (%s, %s): %s", fmt, name, e)
+                if "refused" in str(e) and "exist" not in str(e).lower():
+                    break                                   # the account rejected it; a new name will not help
+    return None, " (clip upload failed: " + " | ".join(dict.fromkeys(errors))[:220] + "; dialer TTS)"
+
+
 def _send_voice(ch: dict, to: str, kind: str, payload: dict, nid: str) -> str:
     """Place an automated voice call through a BulkOBD-compatible dialer (POST <url>/voiceBlast, JSON).
 
@@ -265,14 +342,7 @@ def _send_voice(ch: dict, to: str, kind: str, payload: dict, nid: str) -> str:
     note = ""
     if (ch.get("tts") or "local") == "local" and not sound:
         # speak it here, upload the clip, play that: works even when the dialer's own TTS is silent
-        mp3 = _tts_mp3(text + (f" Press {ack} to acknowledge." if ack else ""), ch)
-        if mp3:
-            try:
-                sound = _upload_sound(ch, base, mp3, f"uvp-{nid[:12]}")
-                note = f" (local voice clip, sound {sound})"
-            except Exception as e:  # noqa: BLE001
-                log.warning("voice clip upload failed, falling back to dialer TTS: %s", e)
-                note = f" (clip upload failed: {str(e)[:80]}; dialer TTS)"
+        sound, note = _local_clip(ch, base, text + (f" Press {ack} to acknowledge." if ack else ""), nid)
     if sound:                                   # pre-recorded clip
         camp_type, sound_id, tts = (2 if ack else 1), int(sound), "NA"
     else:                                       # dynamic text-to-speech

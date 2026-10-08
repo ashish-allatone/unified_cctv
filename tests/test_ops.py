@@ -267,7 +267,7 @@ def test_vendor_presets_and_rtsp_template_adapter(client):
 # ----------------------------------------------------------------------------- Vahan connector + PWA
 def test_vahan_lookup_connector(client, monkeypatch):
     from uvp.config import settings
-    import uvp.services.routes_ops as RO
+    import uvp.integrations as RO
     h = tok(client)
     assert client.get("/api/vehicles/MP04ZR7493/registration", headers=h).status_code == 501
     monkeypatch.setattr(settings, "vahan_url", "http://vahan.test/{plate}")
@@ -281,8 +281,8 @@ def test_vahan_lookup_connector(client, monkeypatch):
         def json(self):
             return {"regn_no": "MP04ZR7493", "maker_model": "HERO SPLENDOR", "status": "ACTIVE"}
 
-    def fake_get(url, headers=None, timeout=0):
-        calls.append((url, headers))
+    def fake_get(url, headers=None, params=None, auth=None, timeout=0):
+        calls.append((url, {k: v for k, v in (headers or {}).items() if k != "Accept"}))
         return R()
     monkeypatch.setattr(RO.requests, "get", fake_get)
     r = client.get("/api/vehicles/mp04 zr 7493/registration", headers=h).json()
@@ -430,7 +430,7 @@ channels:
 routes: []
 """)
     monkeypatch.setattr(settings, "notify_file", cfg)
-    monkeypatch.setattr(N, "_tts_mp3", lambda text, ch: b"ID3fake-mp3" if "test call" in text.lower() and "press 1" in text.lower() else None)
+    monkeypatch.setattr(N, "_tts_mp3", lambda text, ch, fmt=None: b"ID3fake-mp3" if "test call" in text.lower() and "press 1" in text.lower() else None)
     posts = []
 
     class Up:
@@ -449,6 +449,30 @@ routes: []
     assert up["url"] == "http://obd.test/OBDSEA/uploadSound" and up["data"]["username"] == "acc" and up["files"]["file"][1] == b"ID3fake-mp3"
     blast = {k: v[1] for k, v in posts[1]["files"].items()}
     assert blast["soundId"] == "4471" and blast["camp_type"] == "2" and blast["tts_text"] == "NA" and blast["numbers"] == "919876543210" and blast["valid_option"] == "1"
+    assert up["data"]["soundName"].isalnum()                     # plain names: the dialer's upload service chokes on punctuation
+    # the same sentence is not uploaded twice: the clip id is remembered
+    posts.clear()
+    t2 = client.post("/api/admin/notifications/test?channel=voice&to=9876543210", headers=h).json()
+    assert t2["status"] == "sent" and "sound 4471, reused" in t2["detail"] and [p["url"].rsplit("/", 1)[1] for p in posts] == ["voiceBlast"]
+    # upload service broken (Tomcat 500 page): the other clip format is tried, the Tomcat message is shown, the call still goes out
+    from uvp.db import SessionLocal, set_setting
+    with SessionLocal() as s:
+        set_setting(s, "voice_sounds", {}, "test")
+        s.commit()
+    posts.clear()
+
+    class Boom:
+        ok, status_code = False, 500
+        text = "<!DOCTYPE html><html><head><title>Apache Tomcat/8.5.5 - Error report</title></head><body><h1>HTTP Status 500 - Internal Server Error</h1><p><b>type</b> Exception report</p><p><b>message</b> <u>Unsupported audio format</u></p></body></html>"
+    monkeypatch.setattr(N.requests, "post", lambda url, json=None, data=None, files=None, headers=None, timeout=0: (posts.append({"url": url, "files": files}), Boom() if url.endswith("/uploadSound") else Blast())[1])
+    fmts = []
+    monkeypatch.setattr(N, "_tts_mp3", lambda text, ch, fmt=None: (fmts.append(fmt), b"RIFFwav" if fmt != "mp3" else b"ID3mp3")[1])
+    t3 = client.post("/api/admin/notifications/test?channel=voice&to=9876543210", headers=h).json()
+    assert t3["status"] == "sent" and "campaign 586301" in t3["detail"]
+    assert "Unsupported audio format" in t3["detail"] and "<html" not in t3["detail"] and "dialer TTS" in t3["detail"]
+    assert fmts == ["wav", "mp3"] and [p["files"]["file"][0] for p in posts if p["url"].endswith("/uploadSound")] == ["uvp" + posts[0]["files"]["file"][0][3:15] + ".wav", posts[0]["files"]["file"][0].replace(".wav", "wav.wav"), posts[0]["files"]["file"][0].replace(".wav", ".mp3"), posts[0]["files"]["file"][0].replace(".wav", "mp3.mp3")]
+    blast = {k: v[1] for k, v in posts[-1]["files"].items()}
+    assert blast["camp_type"] == "4" and blast["tts_text"] == "{var1}"      # fell back to the dialer's own TTS
     # real espeak-ng output is a playable MP3 when the tool is present
     import shutil
     if shutil.which("espeak-ng") and shutil.which("ffmpeg"):

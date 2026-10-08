@@ -20,7 +20,9 @@ def default_state() -> dict:
 
 
 def state(max_age: float = 5.0) -> dict:
-    """Current switch state (cached max_age seconds)."""
+    """Current switch state (cached max_age seconds). With DETECTION_LOCKED (default) detection is always on."""
+    if settings.detection_locked:
+        return {"enabled": True, "cameras": {}, "locked": True}
     now = time.time()
     if _cache["state"] is None or now - _cache["at"] > max_age:
         try:
@@ -33,6 +35,8 @@ def state(max_age: float = 5.0) -> dict:
 
 
 def allows(camera_id: str) -> bool:
+    if settings.detection_locked:
+        return True
     st = state()
     per = st.get("cameras") or {}
     if camera_id in per:
@@ -41,6 +45,8 @@ def allows(camera_id: str) -> bool:
 
 
 def update(user: str, enabled: bool | None = None, camera_id: str | None = None, on: bool | None = None, clear_cameras: bool = False) -> dict:
+    if settings.detection_locked:
+        raise PermissionError("AI detection is locked on for this deployment (DETECTION_LOCKED=1)")
     with SessionLocal() as s:
         st = get_setting(s, KEY, default_state()) or default_state()
         if enabled is not None:

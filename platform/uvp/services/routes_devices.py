@@ -169,3 +169,64 @@ def site_connector(sid: str, request: Request, u: A.User = Depends(need("admin")
             z.writestr(f"site-connector-{sid}/{name}", body)
     return Response(buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": f"attachment; filename=site-connector-{sid}.zip"})
+
+
+# ----------------------------------------------------------------------------- new channels on template sources (gateways / NVRs)
+class ChannelsBody(BaseModel):
+    channels: int
+    auto_scan: bool | None = None
+
+
+@router.get("/api/sources/{sid}/channels")
+def source_channels(sid: str, u: A.User = Depends(need("sources"))):
+    from . import channel_scan as CS
+    try:
+        return CS.describe(sid)
+    except KeyError:
+        raise HTTPException(404, "no such source")
+
+
+@router.post("/api/sources/{sid}/scan")
+def source_scan(sid: str, request: Request, start: int | None = None, stop: int | None = None, u: A.User = Depends(need("admin"))):
+    """Probe the next channel numbers of a template source (one RTSP session at a time) and report which answer."""
+    from . import channel_scan as CS
+    try:
+        res = CS.scan(sid, start, stop)
+    except KeyError:
+        raise HTTPException(404, "no such source")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    with SessionLocal() as s:
+        audit(s, u.username, "source_scan", sid, f"channels {res['scanned'][0]}-{res['scanned'][1]}: found {res['found']}", _ip(request))
+        s.commit()
+    return res
+
+
+@router.put("/api/sources/{sid}/channels")
+def source_set_channels(sid: str, body: ChannelsBody, request: Request, u: A.User = Depends(need("admin"))):
+    """Set the channel count (adds cameras <sid>-ch<n>); the adapters create them within one sync."""
+    from . import channel_scan as CS
+    try:
+        out = CS.set_channels(sid, body.channels, u.username, body.auto_scan)
+    except KeyError:
+        raise HTTPException(404, "no such source")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    with SessionLocal() as s:
+        audit(s, u.username, "source_channels", sid, f"channels={body.channels} auto_scan={body.auto_scan}", _ip(request))
+        push("device", f"{sid}: channel count set to {body.channels} by {u.username}", "new cameras appear within a minute", ref_id=sid, link="sources", feature="sources", session=s)
+        s.commit()
+    return out
+
+
+@router.put("/api/sources/{sid}/auto-scan")
+def source_auto_scan(sid: str, body: ChannelsBody, request: Request, u: A.User = Depends(need("admin"))):
+    from . import channel_scan as CS
+    try:
+        out = CS.set_auto_scan(sid, bool(body.auto_scan), u.username)
+    except KeyError:
+        raise HTTPException(404, "no such source")
+    with SessionLocal() as s:
+        audit(s, u.username, "source_auto_scan", sid, "on" if body.auto_scan else "off", _ip(request))
+        s.commit()
+    return out

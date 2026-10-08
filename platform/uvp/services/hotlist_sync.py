@@ -140,6 +140,8 @@ def status() -> dict:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     init_db()
+    from .. import metrics as M
+    M.serve()                                   # /metrics on METRICS_PORT doubles as the liveness probe
     nxt: dict[str, float] = {}
     while True:
         cfg = load_yaml(settings.hotlists_file) or {}

@@ -225,6 +225,24 @@ def effective(session, username: str, role: str, departments: list[str], cameras
             cams.add(g.value)
         elif g.kind == "break_glass":
             bg = g
+    # Admin -> Permissions rows (user's own + the role's): they open the cameras and bring the features they need
+    from . import camperms
+    base_depts, base_cams = sorted(set(departments)), sorted(set(cameras or []))
+    cperms: dict[str, list[str]] = {}
+    try:
+        for key, ps in camperms.for_user(session, username, role).items():
+            cperms[key] = sorted(ps)
+            for p in ps:
+                extra.update(camperms.PERM_FEATURES.get(p, set()))
+            if key == "*":
+                depts.add("*")
+            elif key.startswith("dept:"):
+                depts.add(key[5:])
+            else:
+                cams.add(key)
+    except Exception:  # noqa: BLE001  (table not there yet during tooling)
+        cperms = {}
     return {"features": sorted(feats | extra), "grant_features": sorted(extra), "departments": sorted(depts), "cameras": sorted(cams),
+            "base_departments": base_depts, "base_cameras": base_cams, "camera_perms": cperms,
             "break_glass": bg.id if bg else None,
             "break_glass_until": bg.expires_at.isoformat() if bg and bg.expires_at else None}

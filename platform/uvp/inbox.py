@@ -27,7 +27,7 @@ from sqlalchemy import func, select
 from .db import Inbox, InboxRead, SessionLocal, utcnow
 
 log = logging.getLogger("uvp.inbox")
-KINDS = ["alert", "incident", "camera", "device", "detection", "security", "archival", "report", "system"]
+KINDS = ["alert", "incident", "camera", "device", "detection", "security", "archival", "report", "geofence", "system"]
 SEVERITIES = ["info", "warn", "critical"]
 _sink: Callable[[dict], None] | None = None
 _lock = threading.Lock()
@@ -39,16 +39,19 @@ def set_sink(fn: Callable[[dict], None] | None) -> None:
     _sink = fn
 
 
+SEV_RANK = {"info": 0, "warn": 1, "critical": 2}
+
+
 def row_dict(n: Inbox, read: bool | None = None) -> dict:
     d = {"id": n.id, "ts": n.ts.isoformat(), "kind": n.kind, "severity": n.severity, "title": n.title, "body": n.body,
-         "department": n.department, "ref_id": n.ref_id, "link": n.link, "feature": n.feature}
+         "department": n.department, "ref_id": n.ref_id, "link": n.link, "feature": n.feature, "camera_id": getattr(n, "camera_id", "") or ""}
     if read is not None:
         d["read"] = read
     return d
 
 
 def push(kind: str, title: str, body: str = "", *, department: str = "*", severity: str = "info", ref_id: str = "",
-         link: str = "", feature: str = "", session=None) -> dict | None:
+         link: str = "", feature: str = "", camera_id: str = "", session=None) -> dict | None:
     """Store a notification and broadcast it. Never raises (a notification must not break the caller)."""
     kind = kind if kind in KINDS else "system"
     severity = severity if severity in SEVERITIES else "info"
@@ -57,7 +60,7 @@ def push(kind: str, title: str, body: str = "", *, department: str = "*", severi
         s = session or SessionLocal()
         try:
             n = Inbox(kind=kind, severity=severity, title=(title or kind)[:200], body=(body or "")[:4000], department=department or "*",
-                      ref_id=str(ref_id or "")[:64], link=(link or "")[:64], feature=feature or "")
+                      ref_id=str(ref_id or "")[:64], link=(link or "")[:64], feature=feature or "", camera_id=str(camera_id or "")[:64])
             s.add(n)
             if own:
                 s.commit()
@@ -79,13 +82,64 @@ def push(kind: str, title: str, body: str = "", *, department: str = "*", severi
 
 
 # ----------------------------------------------------------------------------- queries
-def _visible(stmt, u):
-    """Rows this user may see: their departments (or everything for '*') and the feature gate."""
+def _visible(stmt, u, prefs: dict | None = None):
+    """Rows this user may see: their departments (or everything for '*'), cameras they were granted explicitly,
+    the feature gate, and their own notification preferences (kinds, minimum severity)."""
     if "*" not in u.departments:
-        stmt = stmt.where(Inbox.department.in_(["*", *u.departments]))
+        cond = Inbox.department.in_(["*", *u.departments])
+        if u.cameras:
+            cond = cond | Inbox.camera_id.in_(list(u.cameras))
+        stmt = stmt.where(cond)
     allowed = [f for f in ("sources", "admin", "reports", "audit", "search", "watchlist", "alerts_ack") if u.has(f)]
     stmt = stmt.where(Inbox.feature.in_(["", *allowed]))
+    prefs = prefs if prefs is not None else preferences(u.username)
+    kinds = prefs.get("kinds")
+    if isinstance(kinds, list) and kinds and set(kinds) != set(KINDS):
+        stmt = stmt.where(Inbox.kind.in_(kinds))
+    lo = SEV_RANK.get(prefs.get("min_severity", "info"), 0)
+    if lo > 0:
+        stmt = stmt.where(Inbox.severity.in_([k for k, v in SEV_RANK.items() if v >= lo]))
     return stmt
+
+
+# ----------------------------------------------------------------------------- per-user preferences
+DEFAULT_PREFS = {"kinds": list(KINDS), "min_severity": "info", "toast": True, "speak": False, "speak_min_severity": "critical", "badge": True}
+
+
+def preferences(username: str) -> dict:
+    from .db import get_setting
+    try:
+        with SessionLocal() as s:
+            p = get_setting(s, f"notif_prefs:{username}", {})
+    except Exception:  # noqa: BLE001
+        p = {}
+    return {**DEFAULT_PREFS, **(p or {})}
+
+
+def save_preferences(username: str, body: dict) -> dict:
+    from .db import set_setting
+    kinds = [k for k in (body.get("kinds") or []) if k in KINDS] or list(KINDS)
+    sev = body.get("min_severity") if body.get("min_severity") in SEVERITIES else "info"
+    ssev = body.get("speak_min_severity") if body.get("speak_min_severity") in SEVERITIES else "critical"
+    p = {"kinds": kinds, "min_severity": sev, "toast": bool(body.get("toast", True)), "speak": bool(body.get("speak", False)),
+         "speak_min_severity": ssev, "badge": bool(body.get("badge", True))}
+    with SessionLocal() as s:
+        set_setting(s, f"notif_prefs:{username}", p, username)
+        s.commit()
+    return p
+
+
+def allowed_for(u, n: dict) -> bool:
+    """Live WebSocket fan-out: should this user receive notification dict `n`?"""
+    dept = n.get("department", "*")
+    if "*" not in u.departments and dept not in ("", "*") and dept not in u.departments and n.get("camera_id", "") not in (u.cameras or []):
+        return False
+    if n.get("feature") and not u.has(n["feature"]):
+        return False
+    p = preferences(u.username)
+    if n.get("kind") not in (p.get("kinds") or KINDS):
+        return False
+    return SEV_RANK.get(n.get("severity", "info"), 0) >= SEV_RANK.get(p.get("min_severity", "info"), 0)
 
 
 def unread_count(s, u) -> int:
@@ -181,18 +235,21 @@ def from_event(kind: str, p: dict) -> None:
             what = "Challan suggested" if p.get("match") == "rule" else "Watchlist hit"
             sev = "critical" if p.get("priority") in ("critical", "high") else "warn"
             push("alert", f"{what}: {p.get('plate', '')}", f"{p.get('reason', '')} · camera {cam}".strip(" ·"), department=dept, severity=sev,
-                 ref_id=p.get("id", ""), link="alerts")
+                 ref_id=p.get("id", ""), link="alerts", camera_id=cam)
+            _geofence_hits("alert", p, dept, cam)
         elif kind == "incident":
             if p.get("priority") not in ("high", "critical"):
                 return
             push("incident", f"{p.get('label') or p.get('kind', 'incident')} at {cam}", f"zone {p.get('zone') or '-'} · priority {p.get('priority')}",
-                 department=dept, severity="critical" if p.get("priority") == "critical" else "warn", ref_id=p.get("id", ""), link="alerts")
+                 department=dept, severity="critical" if p.get("priority") == "critical" else "warn", ref_id=p.get("id", ""), link="alerts", camera_id=cam)
+            _geofence_hits("incident", p, dept, cam)
         elif kind == "camera.health":
             st = p.get("status", "")
             if st not in ("offline", "online", "live"):
                 return
             push("camera", f"Camera {cam} {'back online' if st != 'offline' else 'offline'}", p.get("detail", ""), department=dept,
-                 severity="warn" if st == "offline" else "info", ref_id=cam, link="sources", feature="sources")
+                 severity="warn" if st == "offline" else "info", ref_id=cam, link="sources", feature="sources", camera_id=cam)
+            _geofence_hits("camera", p, dept, cam)
         elif kind == "break_glass":
             push("security", f"Break-glass by {p.get('user', '')}", f"{p.get('reason', '')} · until {p.get('until', '')}", severity="critical",
                  ref_id=p.get("user", ""), link="admin", feature="admin")
@@ -201,3 +258,18 @@ def from_event(kind: str, p: dict) -> None:
                  ref_id=p.get("id", ""), link="reports", feature="reports")
     except Exception:  # noqa: BLE001
         log.debug("inbox from_event failed", exc_info=True)
+
+
+def _geofence_hits(kind: str, p: dict, dept: str, cam: str) -> None:
+    """An alert / incident / camera event inside an active geofence raises a geofence notification."""
+    try:
+        from .geofences import fences_for_camera
+        for f in fences_for_camera(cam):
+            if kind not in (f.get("notify_kinds") or []):
+                continue
+            what = {"alert": f"watchlist hit {p.get('plate', '')}", "incident": p.get("label") or p.get("kind", "incident"),
+                    "camera": f"camera {p.get('status', '')}"}.get(kind, kind)
+            push("geofence", f"{f['name']}: {what}", f"camera {p.get('camera_name') or cam} is inside geofence {f['name']}", department=dept,
+                 severity=f.get("severity") or "warn", ref_id=f["id"], link="map", camera_id=cam)
+    except Exception:  # noqa: BLE001
+        log.debug("geofence check failed", exc_info=True)

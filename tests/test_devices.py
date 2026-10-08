@@ -164,3 +164,52 @@ def test_push_device_site_connector_and_publish_auth(client, monkeypatch):
     assert f"SITE_KEY={key}" in env and "DVR_HOST=192.168.1.108" in env
     assert "junagadh-dvr-ch1/main|rtsp://${DVR_HOST}:554/cam/realmonitor?channel=1&subtype=0" in cams and "channel=2" in cams
     client.delete("/api/devices/junagadh-dvr", headers=h)
+
+
+def test_scan_and_add_new_channels_on_template_source(client, monkeypatch, tmp_path):
+    """Gateways without a camera-list API: probe the next channels, raise the count, adapters pick it up."""
+    from uvp.config import settings
+    from uvp.services import channel_scan as CS
+    from uvp.services.adapter_service import all_sources, db_sources_changed
+    h = tok(client)
+    src = tmp_path / "sources.yaml"
+    src.write_text("""
+sources:
+  - id: gw
+    department: Corp8
+    name: Gateway
+    adapter: rtsp_template
+    host: 203.0.113.9
+    rtsp_port: 8554
+    main: rtsp://{host}:{rtsp_port}/stream/cam{channel:02d}
+    channels: 30
+    max_concurrent_pulls: 10
+""")
+    monkeypatch.setattr(settings, "sources_file", src)
+    alive = {31, 32, 33}
+    monkeypatch.setattr(CS, "probe", lambda cfg, ch, timeout_s=8: {"channel": ch, "ok": ch in alive, "codec": "h264" if ch in alive else "", "size": "", "error": "" if ch in alive else "404 (no such channel)"})
+    monkeypatch.setattr(CS.time, "sleep", lambda s: None)
+    d = client.get("/api/sources/gw/channels", headers=h).json()
+    assert d["scannable"] and d["channels"] == 30 and d["auto_scan"] is False
+    r = client.post("/api/sources/gw/scan", headers=h).json()
+    assert r["found"] == [31, 32, 33] and r["suggested_channels"] == 33 and r["current_channels"] == 30
+    assert r["scanned"][0] == 31 and r["results"][-1]["channel"] == 40          # full window (early stop only when nothing answers)
+    v0 = db_sources_changed(); assert v0 in (True, False)
+    out = client.put("/api/sources/gw/channels", json={"channels": 33, "auto_scan": True}, headers=h).json()
+    assert out["channels"] == 33 and out["auto_scan"] is True
+    cfg = next(s for s in all_sources()["sources"] if s["id"] == "gw")
+    assert cfg["channels"] == 33 and cfg["auto_scan"] is True                  # yaml untouched, override applied
+    assert "channels: 30" in src.read_text()
+    assert db_sources_changed() is True                                          # adapters re-sync at once
+    # auto-scan: channel 34 appears on the gateway -> added without anyone touching the config
+    alive.add(34)
+    CS._last_auto.clear()
+    changed = CS.auto_scan_tick(all_sources())
+    assert changed and changed[0]["to"] == 34
+    assert next(s for s in all_sources()["sources"] if s["id"] == "gw")["channels"] == 34
+    assert CS.auto_scan_tick(all_sources()) == []                                # not again within the interval
+    assert client.put("/api/sources/gw/channels", json={"channels": 0}, headers=h).status_code == 400
+    assert client.get("/api/sources/nope/channels", headers=h).status_code == 404
+    assert client.post("/api/sources/gw/scan", headers=tok(client, "viewer", "viewer123")).status_code == 403
+    acts = [a["action"] for a in client.get("/api/audit?limit=10", headers=h).json()]
+    assert {"source_scan", "source_channels"} <= set(acts)

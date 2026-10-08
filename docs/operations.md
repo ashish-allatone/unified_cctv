@@ -316,3 +316,28 @@ silence for them. The channel therefore defaults to `tts: local`: the sentence i
 the api container, converted to an 8 kHz MP3, uploaded with `/uploadSound`, and the call plays that clip
 (`camp_type` 1, or 2 with `ack_digit`). The Sent log shows `local voice clip, sound <id>`. Set `tts: dialer`
 to use the dialer's own text-to-speech instead; `sound_id:` always plays a fixed pre-recorded clip.
+
+Each distinct sentence is uploaded once and its sound id remembered (setting `voice_sounds`, newest 500), so later
+calls with the same text — every test call, repeated camera-offline notices — reuse the clip (`sound <id>, reused`).
+If `/uploadSound` fails (the dialer's Tomcat returns HTTP 500 for a format or size it dislikes), the clip is retried
+as MP3 and under a plain alphanumeric name, the server's message is shown in the log (`clip upload failed: …`), and
+the call is still placed with the dialer's TTS. If that persists for every call, upload one clip by hand in the
+provider's web panel and set `sound_id:` on the channel, or ask the provider which audio format their upload accepts
+and set `clip_format: mp3` / `wav`.
+
+
+## New cameras on gateways without a camera list (v1.7.3)
+
+A `rtsp_template` source (Corp8 gateway, CP Plus / Hikvision / Dahua NVRs) is defined by a channel count, so
+cameras the client adds later are invisible until the count is raised. Sources → source card:
+
+- **Find new cameras** — probes the next channel numbers one at a time (one extra RTSP session, 8 s each, stops
+  at once on a 401 so a session-capped gateway is never pushed into lock-out) and offers to raise the count.
+- **Auto-add new cameras: ON** — the adapters service repeats that probe for the next `AUTO_SCAN_PROBE` (5)
+  channels every `AUTO_SCAN_INTERVAL_S` (3600 s) and raises the count by itself; a notification is raised.
+
+The new count is stored as a console override in the database (settings `source_overrides`), so
+`config/sources.yaml` is never rewritten and the change survives redeploys; console-connected devices are
+updated in their own config. The adapters re-sync immediately, and the cameras `<source>-ch<n>` appear on the
+wall / map / registry within a minute. API: `GET /api/sources/{id}/channels`, `POST /api/sources/{id}/scan?start=&stop=`,
+`PUT /api/sources/{id}/channels {channels, auto_scan}`, `PUT /api/sources/{id}/auto-scan`.

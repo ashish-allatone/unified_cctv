@@ -1,2 +1,14 @@
-platform/webapp/node_modules
-**/__pycache__
+# keep the build context small: every service Dockerfile is built from the repository root
+.git
+data/
+docs/screenshots/
+tests/_*
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.env
+config/license.json
+deploy/licensing/vendor_private.pem
+*.whl
+*.tar.gz
+*.zip

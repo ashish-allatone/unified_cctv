@@ -117,9 +117,11 @@ class Settings:
     analytics_enabled: bool = _env("ANALYTICS_ENABLED", "1") == "1"
     analytics_model: str = _env("ANALYTICS_MODEL", "platform/models/yolox_nano.onnx")   # COCO detector (Apache-2.0)
     analytics_conf: float = float(_env("ANALYTICS_CONF", "0.35"))
+    analytics_ort_opt: str = _env("ANALYTICS_ORT_OPT", "")           # ONNX Runtime graph optimisation: all|extended|basic|none ("" = all on CPU, basic on GPU)
     analytics_fps: float = float(_env("ANALYTICS_FPS", "2"))          # zone analytics sampling rate per camera
     analytics_count_all: bool = _env("ANALYTICS_COUNT_ALL", "1") == "1"   # vehicle + person counting and crowd alert on every pulled camera
     crowd_max_persons: int = int(_env("CROWD_MAX_PERSONS", "25"))       # default crowd alert threshold (persons in view)
+    detection_locked: bool = _env("DETECTION_LOCKED", "1").lower() in ("1", "on", "true", "yes")       # AI detection always on; the console switch is hidden
     detection_default: bool = _env("DETECTION_DEFAULT", "on").lower() in ("1", "on", "true", "yes")   # AI detection until the console switch is pressed
     geocode_url: str = _env("GEOCODE_URL", "https://nominatim.openstreetmap.org/search")   # OSM Nominatim (or your own instance)
     geocode_region: str = _env("GEOCODE_REGION", "Gujarat, India")                            # appended to camera names
@@ -171,6 +173,9 @@ class Settings:
     ticket_webhook_secret: str = _env("TICKET_WEBHOOK_SECRET", "")
     outage_ticket_minutes: int = int(_env("OUTAGE_TICKET_MINUTES", "15"))
     quality_interval_s: int = int(_env("QUALITY_INTERVAL_S", "300"))  # image-quality sample per camera
+    auto_scan_interval_s: int = int(_env("AUTO_SCAN_INTERVAL_S", "3600"))   # template sources with auto_scan: probe for new channels this often
+    auto_scan_probe: int = int(_env("AUTO_SCAN_PROBE", "5"))                 # how many channel numbers past the current count to try
+    routing_url: str = _env("ROUTING_URL", "https://router.project-osrm.org")   # OSRM-compatible router for route (corridor) geometry; "" = straight lines
     vahan_url: str = _env("VAHAN_URL", "")                              # e.g. http://sim-hotlist:18095/vahan/{plate}
     vahan_headers: str = _env("VAHAN_HEADERS", "")                      # JSON dict of headers (API key)
 

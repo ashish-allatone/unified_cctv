@@ -47,6 +47,9 @@ class User:
     tenant: str = ""
     is_super: bool = False                     # super admin: may create / remove console accounts
     grant_features: list[str] = field(default_factory=list)   # features that came from time-bound grants (not the role)
+    base_departments: list[str] | None = None  # departments / cameras from the account itself (before permission rows)
+    base_cameras: list[str] | None = None
+    camera_perms: dict = field(default_factory=dict)          # Admin -> Permissions rows in force: {camera|dept:X|*: [perms]}
 
     def can(self, role: str) -> bool:          # legacy role ladder (custom roles rank by what they may do)
         return rbac.role_rank(self.role) >= ROLE_RANK[role]
@@ -59,6 +62,19 @@ class User:
 
     def sees_camera(self, camera_id: str, department: str) -> bool:
         return self.sees(department) or camera_id in self.cameras
+
+    def allows(self, camera_id: str, department: str, perm: str) -> bool:
+        """May this account do `perm` (live / playback / export / search / alerts / edit) on this camera?
+        Cameras the account sees on its own (role departments, explicit camera list) allow everything the role
+        allows, as before; cameras it sees only through Admin -> Permissions rows allow exactly those rows' perms."""
+        if not self.sees_camera(camera_id, department):
+            return False
+        bd = self.base_departments if self.base_departments is not None else self.departments
+        bc = self.base_cameras if self.base_cameras is not None else self.cameras
+        if "*" in bd or department in bd or camera_id in bc:
+            return True
+        from . import camperms
+        return camperms.allows(self.camera_perms, camera_id, department, perm)
 
 
 # ----------------------------------------------------------------------------- password + local users
@@ -118,7 +134,7 @@ def _db(username: str, password: str) -> User | None:
         row = s.get(Users, username.strip().lower())
         if row is None or row.provider != "db" or not row.password_hash or not row.is_active or not _verify(password, row.password_hash):
             return None
-        return User(row.username, row.role, list(row.departments or ["*"]), cameras=list(row.cameras or []),
+        return User(row.username, row.role, list(row.departments) if row.departments is not None else ["*"], cameras=list(row.cameras or []),
                     provider="db", tenant=row.tenant or "", is_super=bool(row.is_super))
 
 
@@ -158,7 +174,7 @@ def create_account(session, username: str, password: str, role: str, departments
         session.add(row)
     # (a password-less directory / demo row of this name is upgraded in place; its 2FA and lockout state is reset)
     row.provider, row.password_hash, row.role = "db", hash_password(password), role
-    row.departments, row.cameras = list(departments or ["*"]), list(cameras or [])
+    row.departments, row.cameras = (list(departments) if departments is not None else ["*"]), list(cameras or [])
     row.is_super, row.is_active, row.tenant, row.created_by = is_super, True, tenant, created_by
     row.created_at, row.password_changed_at = dt.datetime.now(dt.timezone.utc), dt.datetime.now(dt.timezone.utc)
     row.totp_secret_enc, row.mfa_enrolled_at, row.backup_codes, row.grace_logins_used = "", None, [], 0
@@ -181,7 +197,7 @@ def update_account(session, username: str, *, role: str | None = None, departmen
             raise AccountError("a super admin keeps the admin role; remove super admin first")
         row.role = role
     if departments is not None:
-        row.departments = list(departments) or ["*"]
+        row.departments = list(departments)            # [] = no department: the account sees only its explicit cameras
     if cameras is not None:
         row.cameras = list(cameras)
     if is_super is not None:
@@ -462,6 +478,7 @@ def with_effective_access(session, u: User) -> User:
     eff = rbac.effective(session, u.username, u.role, u.departments, u.cameras)
     u.features, u.departments, u.cameras = eff["features"], eff["departments"], eff["cameras"]
     u.grant_features = eff["grant_features"]
+    u.base_departments, u.base_cameras, u.camera_perms = eff["base_departments"], eff["base_cameras"], eff["camera_perms"]
     u.break_glass = eff["break_glass"]
     u.tenant = tenant_for(u.departments, u.tenant)
     u.departments = clip_departments(u.departments, u.tenant)
@@ -474,8 +491,19 @@ def issue_token(user: User, ttl_s: int | None = None, purpose: str = "session") 
     ttl = ttl_s or int((auth_cfg().get("session") or {}).get("ttl_hours", settings.token_ttl_s / 3600) * 3600)
     payload = {"sub": user.username, "r": user.role, "d": user.departments, "f": user.features, "c": user.cameras,
                "mfa": user.mfa, "bg": user.break_glass, "p": user.provider, "tn": user.tenant, "su": user.is_super,
-               "g": user.grant_features, "rv": rbac.roles_version(), "t": purpose, "iat": now, "exp": now + ttl}
+               "g": user.grant_features, "rv": rbac.roles_version(), "t": purpose, "iat": now, "exp": now + ttl,
+               "bd": user.base_departments if user.base_departments is not None else user.departments,
+               "bc": user.base_cameras if user.base_cameras is not None else user.cameras,
+               "cp": user.camera_perms, "pv": _camperms_version()}
     return jwt.encode(payload, settings.token_secret, algorithm="HS256")
+
+
+def _camperms_version() -> int:
+    from . import camperms
+    return camperms.version()
+
+
+_EFF_CACHE: dict = {}
 
 
 def verify_token(token: str, purpose: str = "session") -> User | None:
@@ -487,8 +515,33 @@ def verify_token(token: str, purpose: str = "session") -> User | None:
         if p.get("p") != "apikey" and "rv" in p and p["rv"] != rbac.roles_version():
             # a role was edited after this token was issued: follow the role's current permissions (+ granted extras)
             feats = sorted(rbac.role_features(p["r"]) | set(p.get("g", [])))
-        return User(p["sub"], p["r"], p["d"], feats, p.get("c", []), p.get("mfa", False), p.get("bg"),
-                    p.get("p", "local"), p.get("tn", ""), bool(p.get("su", False)), list(p.get("g", [])))
+        u = User(p["sub"], p["r"], p["d"], feats, p.get("c", []), p.get("mfa", False), p.get("bg"),
+                 p.get("p", "local"), p.get("tn", ""), bool(p.get("su", False)), list(p.get("g", [])),
+                 p.get("bd"), p.get("bc"), dict(p.get("cp") or {}))
+        pv = _camperms_version()
+        if p.get("p") != "apikey" and p.get("pv") != pv:
+            # Admin -> Permissions changed after this token was issued: re-read the account's camera access
+            # (once per user and permissions version; cached so a stale token costs no database round trip per request)
+            key = (u.username, u.role, pv, tuple(p.get("bd") or p["d"]), tuple(p.get("bc") or p.get("c", [])))
+            eff = _EFF_CACHE.get(key)
+            if eff is None or time.time() - eff[0] > 15:
+                try:
+                    from .db import SessionLocal
+                    with SessionLocal() as s:
+                        eff = (time.time(), rbac.effective(s, u.username, u.role, list(key[3]), list(key[4])))
+                    if len(_EFF_CACHE) > 2000:
+                        _EFF_CACHE.clear()
+                    _EFF_CACHE[key] = eff
+                except Exception:  # noqa: BLE001
+                    log.exception("could not refresh camera permissions for %s", u.username)
+                    eff = None
+            if eff:
+                e = eff[1]
+                u.departments, u.cameras, u.camera_perms = e["departments"], e["cameras"], e["camera_perms"]
+                u.base_departments, u.base_cameras = e["base_departments"], e["base_cameras"]
+                u.features = sorted(set(u.features) | set(e["grant_features"]))
+                u.grant_features = e["grant_features"]
+        return u
     except Exception:  # noqa: BLE001
         return None
 

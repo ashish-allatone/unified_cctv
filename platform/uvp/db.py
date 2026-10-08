@@ -533,6 +533,27 @@ class AccessGrant(Base):
     revoked_by: Mapped[str] = mapped_column(String(64), default="")
 
 
+class CameraPermission(Base):
+    """Admin -> Permissions: who may do what on which cameras (the bucket-style permission table).
+    scope: one camera, a department, or all cameras; grantee: a user or a role; perms: subset of camperms.PERMS.
+    Rows are never deleted - revoked ones stay for the History tab."""
+    __tablename__ = "camera_permissions"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    scope_kind: Mapped[str] = mapped_column(String(16), index=True)        # camera | department | all
+    scope_value: Mapped[str] = mapped_column(String(128), default="*")     # camera id / department / "*"
+    grantee_kind: Mapped[str] = mapped_column(String(8), index=True)       # user | role
+    grantee: Mapped[str] = mapped_column(String(64), index=True)           # username / role name
+    perms: Mapped[list] = mapped_column(JSON, default=list)                # ["live", "playback", ...]
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    granted_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    expires_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    revoked_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    revoked_by: Mapped[str] = mapped_column(String(64), default="")
+
+
 class Role(Base):
     """Console roles with their permissions. The four built-in roles are seeded from uvp.rbac and can be
     adjusted; custom roles are added from Admin -> Roles. Effective permissions of a signed-in user follow
@@ -562,6 +583,7 @@ class Inbox(Base):
     ref_id: Mapped[str] = mapped_column(String(64), default="")
     link: Mapped[str] = mapped_column(String(64), default="")           # console view to open (alerts, sources, ...)
     feature: Mapped[str] = mapped_column(String(32), default="")        # "" = everyone; else only users with that feature
+    camera_id: Mapped[str] = mapped_column(String(64), default="", index=True)   # users with an explicit grant on this camera see it too
 
 
 class InboxRead(Base):
@@ -596,6 +618,53 @@ class ArchivalRun(Base):
     archived: Mapped[dict] = mapped_column(JSON, default=dict)
     held: Mapped[int] = mapped_column(Integer, default=0)                  # rows skipped because of a legal hold
     detail: Mapped[str] = mapped_column(Text, default="")
+
+
+class Route(Base):
+    """A VIP route / corridor / road filter: which cameras to watch between two places (e.g. Amroha -> Delhi),
+    or along one road inside one area (e.g. NH24 in Delhi). Cameras are matched by distance to the route
+    path (`buffer_m`) and / or by keywords on road and area; see uvp.corridors."""
+    __tablename__ = "routes"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(300), default="")
+    waypoints: Mapped[list] = mapped_column(JSON, default=list)       # [{"name": "Amroha", "lat": .., "lon": ..}, ...]
+    path: Mapped[list] = mapped_column(JSON, default=list)            # [[lat, lon], ...] road geometry (routing) or the straight waypoint line
+    buffer_m: Mapped[int] = mapped_column(Integer, default=500)
+    road: Mapped[str] = mapped_column(String(120), default="")        # keyword(s) the camera's road / address / tags must contain, e.g. "NH24, NH-24"
+    area: Mapped[str] = mapped_column(String(120), default="")        # keyword(s) on zone / ward / address / department / name, e.g. "Delhi"
+    department: Mapped[str] = mapped_column(String(64), default="")
+    priority: Mapped[str] = mapped_column(String(16), default="normal")   # normal | vip
+    camera_ids: Mapped[list] = mapped_column(JSON, default=list)      # explicit extra cameras (always included)
+    exclude_ids: Mapped[list] = mapped_column(JSON, default=list)
+    active_from: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    active_to: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class Geofence(Base):
+    """A geographic area drawn on the map (circle or polygon). Cameras inside it are grouped; alerts / incidents
+    from those cameras raise a geofence notification; a VIP route or an operator can open them on the wall."""
+    __tablename__ = "geofences"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(300), default="")
+    kind: Mapped[str] = mapped_column(String(12), default="circle")       # circle | polygon
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)        # circle centre
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    radius_m: Mapped[int] = mapped_column(Integer, default=500)
+    polygon: Mapped[list] = mapped_column(JSON, default=list)              # [[lat, lon], ...]
+    department: Mapped[str] = mapped_column(String(64), default="")
+    notify_kinds: Mapped[list] = mapped_column(JSON, default=lambda: ["alert", "incident"])   # which events inside raise a geofence notification
+    severity: Mapped[str] = mapped_column(String(12), default="warn")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class LegalHold(Base):
@@ -691,6 +760,9 @@ def _migrate() -> None:
                          ("created_at", "TIMESTAMP"), ("created_by", "VARCHAR(64) DEFAULT ''"), ("updated_by", "VARCHAR(64) DEFAULT ''")):
             if col not in have_cam:
                 con.execute(text(f"ALTER TABLE cameras ADD COLUMN {col} {ddl}"))
+        have_inbox = {c["name"] for c in insp.get_columns("inbox")} if insp.has_table("inbox") else set()
+        if have_inbox and "camera_id" not in have_inbox:
+            con.execute(text("ALTER TABLE inbox ADD COLUMN camera_id VARCHAR(64) DEFAULT ''"))
     _seed_roles()
 
 

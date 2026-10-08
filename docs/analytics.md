@@ -122,14 +122,31 @@ YOLOv8/11/26 with `nms=False`) and **Ultralytics end-to-end** exports (`[1, 300,
 overview cameras benefit most from a stronger small-object model.
 
 ```bash
-pip install ultralytics
-yolo export model=yolo26n.pt format=onnx imgsz=640        # writes yolo26n.onnx (end-to-end head)
-cp yolo26n.onnx platform/models/
+tools/export_yolo.sh                 # -> platform/models/yolo26n.onnx (640) + yolo26n-416.onnx   (or copy the shipped files there)
 # .env
-ANALYTICS_MODEL=platform/models/yolo26n.onnx
+ANALYTICS_MODEL=platform/models/yolo26n.onnx      # or yolo26n-416.onnx on a small CPU box
 ANALYTICS_CONF=0.3
-docker compose build analytics anpr && docker compose up -d analytics anpr
+docker compose build && docker compose up -d      # the models are baked into the images at build time
 ```
+
+Measured on one CPU core pair with the platform's own decoder (`docs/test_assets/street.jpg`): YOLOX-nano 416 ≈ 12 ms,
+YOLO26n 416 ≈ 18 ms, YOLO26n 640 ≈ 36 ms, **YOLO12x 640 ≈ 860 ms** per frame.
+
+**GPU stability (v1.9.10).** On the CUDA provider the ONNX Runtime graph optimiser now stays at *basic*
+(`ANALYTICS_ORT_OPT`, default `basic` on GPU / `all` on CPU): the *extended* level fuses attention / layer-norm
+blocks into CUDA kernels that fault on some models — YOLO12's area attention produced `CUDA failure 716: misaligned
+address`, after which every frame failed because a CUDA fault is sticky for the whole context. The detector also
+heals itself: on a CUDA fault it rebuilds the GPU session, and after three faults in a row it moves to the CPU
+provider (ERROR in the log) so counts and alerts keep flowing while you fix the model / driver. If YOLO12x still
+faults with `basic`, try `ANALYTICS_ORT_OPT=none`, or use YOLO26 (convolutional, no attention) on the GPU.
+
+**Large models (YOLO12x, YOLO26l/x) need a GPU.** `tools/export_yolo.sh yolo12x 640` writes `platform/models/yolo12x.onnx`
+(226 MB, raw head `[1, 84, 8400]`; the platform applies NMS). At ~0.9 s per frame on CPU it can follow about two
+cameras at 1 fps — not 30. Run it with the GPU override (`docker compose -f docker-compose.yml -f docker-compose.gpu.yml …`,
+`ANPR_GPU=1`, NVIDIA Container Toolkit), where it runs at ~15–25 ms per frame on a T4-class card; or pick a model that
+fits the box: YOLO12n/s (CPU, ~40/48 mAP) or YOLO26n/s. YOLO12 is attention-based and gains the most from a GPU. With 30 cameras at `ANALYTICS_FPS=2` that is 60 inferences/s,
+so YOLO26n-640 needs ~2.2 CPU cores for inference alone (416: ~1.1) — check `ANALYTICS_WORKERS` / cores, or lower
+`ANALYTICS_FPS` to 1. (There is no "YOLO25": the Ultralytics line goes YOLO11 → YOLO12 → YOLO26, released January 2026.)
 
 YOLO26n: 40.9 COCO mAP, 2.4 M parameters, trained with small-target-aware label assignment; expect several
 times more small vehicles found on a 1080p junction view than the bundled model, often without `tiles: 2`.

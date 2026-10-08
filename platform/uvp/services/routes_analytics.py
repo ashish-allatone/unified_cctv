@@ -171,7 +171,10 @@ def detection_state(u: A.User = Depends(current_user)):
 @router.post("/api/detection")
 def detection_set(body: DetectionBody, request: Request, u: A.User = Depends(need("supervisor"))):
     from .. import detection as DETECT
-    st = DETECT.update(u.username, enabled=body.enabled, camera_id=body.camera_id, on=body.on, clear_cameras=body.clear_cameras)
+    try:
+        st = DETECT.update(u.username, enabled=body.enabled, camera_id=body.camera_id, on=body.on, clear_cameras=body.clear_cameras)
+    except PermissionError as e:
+        raise HTTPException(423, str(e))
     with SessionLocal() as s:
         what = f"global {'ON' if st['enabled'] else 'OFF'}" if body.enabled is not None else (f"{body.camera_id} -> {body.on}" if body.camera_id else "reset overrides")
         audit(s, u.username, "detection_switch", body.camera_id or "global", what, _ip(request))

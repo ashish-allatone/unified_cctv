@@ -1,8 +1,13 @@
 # Inputs for deploy/k8s/render.py (python deploy/k8s/render.py > manifests.yaml). The same values map 1:1 to
 # a Helm chart; the generator is used because it can be validated without a cluster.
 namespace: unified-cctv
-image: registry.example.gov.in/uvp/platform:0.1
-imageGpu: registry.example.gov.in/uvp/platform-gpu:0.1
+# Images: one per service, built from <service>/Dockerfile (Jenkinsfile) and pushed to OCIR as
+#   <registry>/<tenancy-namespace>/uvp-<service>:<tag>      tag = VERSION file (or the git SHA)
+registry: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE
+tag: 1.9.10
+imageGpu: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-anpr-gpu:1.9.10
+imagePullSecret: ocir-pull        # kubectl create secret docker-registry ocir-pull --docker-server=ap-mumbai-1.ocir.io ...
+relayImage: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-relay:1.9.10   # or bluenviron/mediamtx:1.15.1-ffmpeg
 publicHost: cctv.example.gov.in
 storageClass: standard
 # Managed / HA data services (see docs/ha.md): the platform never runs these itself in production
@@ -15,8 +20,9 @@ relayRecordingsGb: 200       # local segment buffer per relay
 api: {replicas: 2, cpu: "500m", memory: "1Gi", maxReplicas: 6}
 anpr: {replicas: 2, cpu: "2", memory: "3Gi", gpu: false, maxReplicas: 8}   # each replica = one shard (ANPR_SHARD from the pod ordinal)
 analytics: {replicas: 1, cpu: "1", memory: "2Gi"}
-archiver: {replicas: 1}
-adapters: {replicas: 1}
-indexer: {replicas: 2}
-hotlist: {replicas: 1}
+faces: {replicas: 1, cpu: "1", memory: "2Gi"}
+archiver: {replicas: 1, cpu: "500m", memory: "1Gi"}
+adapters: {replicas: 1, cpu: "500m", memory: "512Mi"}
+indexer: {replicas: 2, cpu: "500m", memory: "1Gi"}
+hotlist: {replicas: 1, cpu: "250m", memory: "256Mi"}
 keda: true                   # ScaledObject for the indexer on Kafka lag (needs KEDA installed)

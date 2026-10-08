@@ -624,16 +624,24 @@ class GeocodeBody(BaseModel):
     limit: int = 10                                    # cameras per call (Nominatim allows ~1 request / s)
 
 
-def geocode(query: str) -> list[dict]:
-    """Look a place name up with Nominatim (or GEOCODE_URL). Returns candidates [{lat, lon, label, score}]."""
+def geocode(query: str, near: tuple[float, float] | None = None) -> list[dict]:
+    """Look a place name up with Nominatim (or GEOCODE_URL). Returns candidates [{lat, lon, label, score}].
+    `near` (lat, lon) biases the search to ~150 km around that point (results inside are preferred, not required),
+    so a locality name that exists in several cities resolves to the one where the cameras are."""
     import requests
     ua = "UnifiedCCTV-Registry/1.4" + (f" ({settings.geocode_contact})" if settings.geocode_contact else "")
     q = query if "," in query and settings.geocode_region.split(",")[0].lower() in query.lower() else f"{query}, {settings.geocode_region}"
+    params = {"q": q, "format": "jsonv2", "limit": 3, "countrycodes": "in", "addressdetails": 0}
+    if near:
+        params["viewbox"] = f"{near[1] - 1.5:.4f},{near[0] + 1.5:.4f},{near[1] + 1.5:.4f},{near[0] - 1.5:.4f}"
+        params["bounded"] = 0
     try:
-        rr = requests.get(settings.geocode_url, params={"q": q, "format": "jsonv2", "limit": 3, "countrycodes": "in", "addressdetails": 0},
-                          headers={"User-Agent": ua, "Accept-Language": "en"}, timeout=12)
+        rr = requests.get(settings.geocode_url, params=params, headers={"User-Agent": ua, "Accept-Language": "en"}, timeout=12)
         rr.raise_for_status()
         items = rr.json()
+        if near and len(items) > 1:                  # Nominatim only prefers the viewbox; make it decisive
+            from ..corridors import haversine_m
+            items.sort(key=lambda x: haversine_m(near[0], near[1], float(x["lat"]), float(x["lon"])) > 150_000)
     except Exception as e:  # noqa: BLE001
         log.warning("geocode %r failed: %s", query, e)
         return [{"error": str(e)[:120]}]

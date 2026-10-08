@@ -90,6 +90,62 @@ def test_detector_and_attributes_on_real_photo():
     assert b["vehicle_type"] == "two_wheeler" and b["type_source"] == "plate_geometry"
 
 
+def test_yolo26_export_is_decoded_when_present():
+    """YOLO26 end-to-end ONNX ([1, 300, 6]) through the same Detector; skipped when the AGPL model file is not shipped."""
+    import cv2
+    from uvp.analytics.detector import Detector
+    for name in ("yolo26n.onnx", "yolo26n-416.onnx"):
+        path = ROOT / "platform" / "models" / name
+        if not path.exists():
+            pytest.skip(f"{name} not present (export with tools/export_yolo.sh)")
+        det = Detector(path, threads=2, conf=0.3)
+        assert det.family == "ultralytics_e2e" and det.size in (416, 640)
+        dets = det(cv2.imread(str(ROOT / "docs" / "test_assets" / "street.jpg")))
+        assert any(d.cls == "bicycle" for d in dets) and any(d.cls in ("car", "truck") for d in dets)
+        assert all(0 <= d.bbox[0] < d.bbox[2] and 0 <= d.bbox[1] < d.bbox[3] for d in dets)
+    raw = ROOT / "platform" / "models" / "yolo12x.onnx"          # raw-head export [1, 84, 8400]: platform-side NMS
+    if raw.exists():
+        det = Detector(raw, threads=2, conf=0.3)
+        assert det.family == "ultralytics_raw"
+        dets = det(cv2.imread(str(ROOT / "docs" / "test_assets" / "street.jpg")))
+        assert any(d.cls == "bicycle" for d in dets) and len(dets) == len({(d.cls, d.bbox) for d in dets})
+
+
+def test_detector_survives_cuda_faults_and_falls_back_to_cpu(monkeypatch):
+    """A sticky CUDA fault (e.g. 'CUDA failure 716: misaligned address') must not drop every frame for ever:
+    the session is rebuilt, and after three faults in a row the detector moves to the CPU provider."""
+    import cv2
+    from uvp.analytics import detector as D
+    det = D.Detector(ROOT / "platform" / "models" / "yolox_nano.onnx", threads=1, conf=0.3)
+    det.on_cpu = False                                  # pretend we are on the GPU
+    img = cv2.imread(str(ROOT / "docs" / "test_assets" / "street.jpg"))
+    real_run = det.sess.run
+    state = {"faults": 0, "opened": []}
+
+    class Boom:
+        def run(self, *a, **k):
+            state["faults"] += 1
+            raise RuntimeError("[ONNXRuntimeError] : 1 : FAIL : CUDA failure 716: misaligned address ; GPU=0")
+
+    def fake_open(gpu):
+        state["opened"].append(gpu)
+        if gpu:
+            return Boom()
+        return D.ort_session_for_test(det)
+    D.ort_session_for_test = lambda d: type("S", (), {"run": staticmethod(real_run), "get_providers": lambda self: ["CPUExecutionProvider"]})()
+    det.sess = Boom()
+    monkeypatch.setattr(det, "_open", fake_open)
+    dets = det(img)                                      # fault -> rebuild GPU (fault) -> rebuild GPU (fault) -> CPU
+    assert det.on_cpu is True and state["opened"] == [True, True, False]
+    assert any(d.cls == "car" for d in dets)
+    assert det(img) and state["faults"] == 3             # no more faults once on the CPU
+    # a non-CUDA error is not swallowed
+    det.on_cpu = False
+    det.sess = type("Bad", (), {"run": lambda *a, **k: (_ for _ in ()).throw(ValueError("shape mismatch"))})()
+    with pytest.raises(ValueError):
+        det(img)
+
+
 # ----------------------------------------------------------------------------- traffic rules through the indexer
 def test_wrong_way_over_speed_triple_riding_create_alerts_and_challans(client):
     h = tok(client)
@@ -349,7 +405,13 @@ def test_counts_timeline_and_count_all_defaults(client, monkeypatch):
 def test_detection_switch_api_and_worker_gate(client, monkeypatch):
     """The console switch turns AI detection off globally or per camera; workers consult detection.allows()."""
     from uvp import detection as D
+    from uvp.config import settings
     h = tok(client)
+    # locked (the default): always on, the switch is refused
+    monkeypatch.setattr(settings, "detection_locked", True)
+    assert client.get("/api/detection", headers=h).json()["enabled"] is True and D.allows("police-cam1") is True
+    assert client.post("/api/detection", json={"enabled": False}, headers=h).status_code == 423
+    monkeypatch.setattr(settings, "detection_locked", False)
     st = client.get("/api/detection", headers=h).json()
     assert st["enabled"] is True and st["cameras"] == {}
     # viewer cannot switch, supervisor can

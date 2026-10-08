@@ -146,6 +146,44 @@ def test_timeline_and_stitch(client, tmp_path):
     assert client.get("/api/vehicles/MP04ZR7493/timeline", headers=pol).json()["clips_available"] == 2   # police clips only
 
 
+def test_vehicles_seen_on_several_cameras(client):
+    from uvp.db import AnprEvent, SessionLocal
+    h = tok(client)
+    t0 = dt.datetime(2026, 9, 22, 6, 0, tzinfo=dt.timezone.utc)          # MP04ZR7493 was seeded at 06:00 / 06:05 / 06:10 on police-cam1, muni-cam1, police-cam1
+    with SessionLocal() as s:                       # a second plate on one camera only, and a third on two
+        s.add(AnprEvent(id="a" * 32, camera_id="police-cam1", department="Police", ts=t0, plate="GJ01AB1111", plate_raw="GJ01AB1111", confidence=0.9, reads=1, tags=[]))
+        s.add(AnprEvent(id="b" * 32, camera_id="police-cam1", department="Police", ts=t0 + dt.timedelta(minutes=1), plate="GJ01AB2222", plate_raw="GJ01AB2222", confidence=0.9, reads=1, tags=[]))
+        s.add(AnprEvent(id="c" * 32, camera_id="muni-cam1", department="Municipal", ts=t0 + dt.timedelta(minutes=9), plate="GJ01AB2222", plate_raw="GJ01AB2222", confidence=0.9, reads=2, tags=[]))
+        s.commit()
+    win = f"since={t0.isoformat()}&until={(t0 + dt.timedelta(hours=2)).isoformat()}"
+    r = client.get(f"/api/vehicles/multi-camera?{win}", headers=h).json()
+    plates = [x["plate"] for x in r["items"]]
+    assert plates == ["MP04ZR7493", "GJ01AB2222"] and "GJ01AB1111" not in plates       # both on 2 cameras, newest last_seen first; single-camera plate excluded
+    top = r["items"][0]
+    assert top["camera_count"] == 2 and [c["id"] for c in top["cameras"]] == ["police-cam1", "muni-cam1"] and top["span_min"] == 10
+    assert top["cameras"][0]["sightings"] == 2                                              # police-cam1 saw it twice
+    assert r["items"][1]["sightings"] == 2 and r["items"][1]["span_min"] == 8
+    assert client.get(f"/api/vehicles/multi-camera?{win}&min_cameras=3", headers=h).json()["total"] == 0
+    both = client.get(f"/api/vehicles/multi-camera?{win}&cameras=police-cam1,muni-cam1", headers=h).json()
+    assert [x["plate"] for x in both["items"]] == ["MP04ZR7493", "GJ01AB2222"]
+    assert client.get(f"/api/vehicles/multi-camera?{win}&cameras=police-cam1,nope", headers=h).json()["total"] == 0
+    # a Police-only operator sees only Police cameras: every plate is then on one camera -> nothing
+    pol = tok(client, "police_op", "police123")
+    assert client.get(f"/api/vehicles/multi-camera?{win}", headers=pol).json()["total"] == 0
+    assert client.get(f"/api/vehicles/multi-camera?since={t0.isoformat()}&until={t0.isoformat()}", headers=h).status_code == 400
+    # a whole year (and more) is allowed; limit + total for paging large answers
+    # plate pattern on the multi-camera page; several cameras at once on /api/events
+    assert [x["plate"] for x in client.get(f"/api/vehicles/multi-camera?{win}&plate=GJ01*", headers=h).json()["items"]] == ["GJ01AB2222"]
+    ev = client.get(f"/api/events?camera=police-cam1,muni-cam1&since={t0.isoformat()}", headers=h).json()["events"]
+    assert {e["camera_id"] for e in ev} == {"police-cam1", "muni-cam1"} and len(ev) >= 5
+    assert {e["camera_id"] for e in client.get(f"/api/events?camera=muni-cam1&since={t0.isoformat()}", headers=h).json()["events"]} == {"muni-cam1"}
+    year = client.get(f"/api/vehicles/multi-camera?since=2026-01-01T00:00:00Z&until=2027-01-01T00:00:00Z&limit=1", headers=h).json()
+    assert year["total"] == 2 and len(year["items"]) == 1 and year["truncated"] is True and year["items"][0]["plate"] == "MP04ZR7493"
+    assert client.get("/api/vehicles/multi-camera", headers=tok(client, "viewer", "viewer123")).status_code == 403
+    acts = [a["action"] for a in client.get("/api/audit?limit=20", headers=h).json()]
+    assert "multi_camera_query" in acts
+
+
 def test_bookmark_cut_from_archive(client):
     h = tok(client)
     b = client.post("/api/bookmarks", json={"camera_id": "police-cam1", "ts": "2026-09-22T07:00:50+00:00", "label": "scuffle at gate",

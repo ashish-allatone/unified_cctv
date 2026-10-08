@@ -55,17 +55,8 @@ sims() {
   (cd "$ROOT/simulators" && HOTLIST_API_KEY="${HOTLIST_API_KEY:-demo}" start_bg sim-hotlist python3 -m uvicorn sim_hotlist:app --port 18095 --log-level warning)
 }
 
-console() {  # build the React operator console into platform/web once (or when CONSOLE_REBUILD=1)
-  [[ -f "$ROOT/platform/web/index.html" && "${CONSOLE_REBUILD:-0}" != "1" ]] && return
-  command -v npm >/dev/null || { echo "  npm not found: install Node.js 20+ to build the console (platform/webapp)"; return; }
-  echo "  building operator console (platform/webapp)…"
-  (cd "$ROOT/platform/webapp" && npm install --no-audit --no-fund --silent && npm run build --silent) >"$RUN/console-build.log" 2>&1 \
-    || echo "  console build failed, see $RUN/console-build.log"
-}
-
 platform() {
   echo "Unified viewing platform:"
-  console
   [[ -f "$RUN/relay-b.pid" ]] && LITE_HA=1     # a second relay is running: keep the cluster env on restarts
   mkdir -p "$ROOT/data/recordings"
   TZ=UTC MTX_PATHDEFAULTS_RECORDPATH="$ROOT/data/recordings/relay/%path/%Y-%m-%d_%H-%M-%S-%f" \

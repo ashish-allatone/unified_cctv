@@ -253,3 +253,332 @@ def test_archival_policies_preview_run_and_holds(client):
     r = client.put("/api/archival/schedule", json={"hour_ist": 3, "enabled": True}, headers=admin)
     assert r.status_code == 200 and r.json()["hour_ist"] == 3
     assert client.get("/api/archival", headers=tok(client, "viewer", "viewer123")).status_code == 403
+
+
+def test_health_and_readiness_endpoints(client):
+    h = client.get("/healthz").json()
+    assert h["ok"] is True and h["version"]
+    r = client.get("/readyz")
+    assert r.status_code == 200 and r.json()["database"] == "ok" and "relay" in r.json()
+
+
+# ----------------------------------------------------------------------------- external APIs from the console
+def test_integrations_configured_from_console(client, monkeypatch):
+    import uvp.integrations as I
+    admin = tok(client)
+    st = client.get("/api/integrations", headers=admin).json()
+    names = {i["name"]: i for i in st["integrations"]}
+    assert {"vahan", "sarathi", "custom"} <= set(names) and names["sarathi"]["enabled"] is False and names["sarathi"]["has_secret"] is False
+    # validation
+    assert client.put("/api/integrations/sarathi", json={"enabled": True, "url": "https://sarathi.test/dl"}, headers=admin).status_code == 400   # no {dl}
+    assert client.put("/api/integrations/sarathi", json={"enabled": True, "url": "https://sarathi.test/{dl}", "auth": "bearer"}, headers=admin).status_code == 400  # no secret
+    assert client.put("/api/integrations/nope", json={"enabled": False}, headers=admin).status_code == 400
+    r = client.put("/api/integrations/sarathi", json={"enabled": True, "url": "https://sarathi.test/api/{dl}", "auth": "bearer", "secret": "tok-123",
+                                                      "extra_headers": '{"X-Client": "uvp"}', "cache_s": 60}, headers=admin)
+    assert r.status_code == 200 and r.json()["has_secret"] is True and r.json()["source"] == "console" and "secret" not in r.json()
+    assert client.get("/api/integrations", headers=admin).json()["integrations"][1]["extra_headers"] == {"X-Client": "uvp"}
+    calls = []
+
+    class R:
+        ok, status_code, text = True, 200, "{}"
+        def json(self):
+            return {"holder": {"name": "RAM KUMAR"}, "valid_till": "2031-05-01", "classes": ["LMV", "MCWG"]}
+    monkeypatch.setattr(I.requests, "get", lambda url, headers=None, params=None, auth=None, timeout=0: (calls.append((url, headers)) or R()))
+    t = client.post("/api/integrations/sarathi/test?value=GJ01 2020 0012345", headers=admin).json()
+    assert t["ok"] and calls[0][0] == "https://sarathi.test/api/GJ01%202020%200012345" and calls[0][1]["Authorization"] == "Bearer tok-123" and calls[0][1]["X-Client"] == "uvp"
+    assert ("holder / name", "RAM KUMAR") in [tuple(x) for x in t["rows"]]
+    assert client.get("/api/integrations", headers=admin).json()["integrations"][1]["last_test"]["ok"] is True
+    # lookup by an investigator, cached, audited; viewer refused
+    lk = client.get("/api/lookup/sarathi/GJ01 2020 0012345", headers=admin).json()
+    assert lk["data"]["valid_till"] == "2031-05-01" and len(calls) == 2
+    client.get("/api/lookup/sarathi/GJ0120200012345", headers=admin)
+    assert len(calls) == 2
+    assert client.get("/api/lookup/sarathi/x", headers=tok(client, "viewer", "viewer123")).status_code == 403
+    assert client.get("/api/lookup/vahan/GJ01AB1234", headers=admin).status_code == 501     # vahan still unconfigured
+    # keep secret when blank, clear on request, disable
+    r = client.put("/api/integrations/sarathi", json={"enabled": True, "url": "https://sarathi.test/api/{dl}", "auth": "bearer"}, headers=admin).json()
+    assert r["has_secret"] is True
+    r = client.put("/api/integrations/sarathi", json={"enabled": False, "url": "https://sarathi.test/api/{dl}", "auth": "bearer", "clear_secret": True}, headers=admin).json()
+    assert r["has_secret"] is False and r["enabled"] is False
+    assert client.get("/api/lookup/sarathi/GJ0120200012345", headers=admin).status_code == 501
+    acts = [a["action"] for a in client.get("/api/audit?limit=20", headers=admin).json()]
+    assert {"integration_update", "integration_test", "sarathi_lookup"} <= set(acts)
+
+
+# ----------------------------------------------------------------------------- VIP routes / corridors
+def test_routes_corridor_and_road_filter(client, monkeypatch):
+    from uvp import corridors
+    from uvp.db import Camera, SessionLocal
+    import uvp.services.routes_corridors as RC
+    admin = tok(client)
+    # cameras: along NH24 Amroha->Delhi (roughly a line), one in Delhi off the highway, one far away in Ahmedabad
+    cams = [("nh24-amroha", "NH24 Amroha toll", 28.905, 78.470, "Amroha", "NH-24 toll plaza, Amroha"),
+            ("nh24-garhmukteshwar", "NH24 Garhmukteshwar bridge", 28.790, 78.100, "Hapur", "NH24 Ganga bridge"),
+            ("nh24-hapur", "NH24 Hapur bypass", 28.730, 77.780, "Hapur", "NH 24 bypass"),
+            ("nh24-ghaziabad", "NH24 Ghaziabad", 28.645, 77.430, "Ghaziabad", "NH-24, Vijay Nagar"),
+            ("nh24-delhi-nizamuddin", "NH24 Nizamuddin bridge", 28.595, 77.255, "Delhi", "NH24 Sarai Kale Khan, Delhi"),
+            ("delhi-cp", "Connaught Place", 28.631, 77.219, "Delhi", "Outer circle, CP, New Delhi"),
+            ("amd-paldi", "Paldi circle", 23.015, 72.560, "Ahmedabad", "Paldi, Ahmedabad")]
+    with SessionLocal() as s:
+        for cid, name, lat, lon, zone, addr in cams:
+            s.add(Camera(id=cid, name=name, department="Police", source_id="registry", lat=lat, lon=lon, zone=zone, address=addr, status="registered"))
+        s.commit()
+    # no internet in tests: geocoder + router are stubbed
+    places = {"amroha": (28.903, 78.467), "delhi": (28.613, 77.209)}
+    monkeypatch.setattr(RC, "_geocode", lambda q: [{"lat": places[q.lower()][0], "lon": places[q.lower()][1], "label": q}] if q.lower() in places else [])
+    monkeypatch.setattr(corridors.settings, "routing_url", "")        # straight line
+    # 1. corridor Amroha -> Delhi with a wide buffer: the highway cameras in order, not CP, not Ahmedabad
+    r = client.post("/api/routes", json={"name": "VIP: Amroha to Delhi", "waypoints": ["Amroha", "Delhi"], "buffer_m": 8000, "priority": "vip"}, headers=admin)
+    assert r.status_code == 201, r.text
+    rt = r.json()
+    ids = [c["id"] for c in rt["cameras"]]
+    assert ids[0] == "nh24-amroha" and ids[1] == "nh24-garhmukteshwar" and "amd-paldi" not in ids
+    assert {"nh24-ghaziabad", "nh24-delhi-nizamuddin"} <= set(ids)                  # CP (2 km from the Delhi end point) may be in too
+    assert rt["cameras"][0]["km"] == 0.0 and rt["cameras"][-1]["km"] > 100 and rt["length_km"] > 100
+    assert len(rt["path"]) == 2 and rt["waypoints"][0]["name"] == "Amroha"
+    # 2. road + area filter only: NH24 cameras in Delhi
+    r = client.post("/api/routes", json={"name": "NH24 in Delhi", "road": "NH24, NH-24, NH 24", "area": "Delhi"}, headers=admin)
+    assert r.status_code == 201 and [c["id"] for c in r.json()["cameras"]] == ["nh24-delhi-nizamuddin"]
+    # 3. combined: corridor + road keyword, excluding one, forcing CP in
+    r = client.post("/api/routes", json={"name": "NH24 corridor", "waypoints": ["Amroha", "Delhi"], "buffer_m": 8000, "road": "NH24",
+                                         "exclude_ids": ["nh24-hapur"], "camera_ids": ["delhi-cp"]}, headers=admin).json()
+    ids = [c["id"] for c in r["cameras"]]
+    assert "nh24-hapur" not in ids and "delhi-cp" in ids and "nh24-ghaziabad" in ids
+    assert next(c for c in r["cameras"] if c["id"] == "delhi-cp")["reason"] == "added"
+    # preview without saving, validation, geocode failure
+    pv = client.post("/api/routes/preview", json={"waypoints": ["Amroha", "Delhi"], "buffer_m": 1000}, headers=admin).json()
+    assert pv["camera_count"] >= 1 and pv["length_km"] > 100
+    one = client.post("/api/routes", json={"name": "Around Amroha toll", "waypoints": ["Amroha"], "buffer_m": 3000}, headers=admin)
+    assert one.status_code == 201 and [c["id"] for c in one.json()["cameras"]] == ["nh24-amroha"] and one.json()["description"].startswith("around Amroha")
+    assert client.post("/api/routes", json={"name": "x"}, headers=admin).status_code == 400
+    assert client.post("/api/routes", json={"name": "x", "waypoints": ["Nowhere"]}, headers=admin).status_code == 400
+    # list, update buffer, delete; viewer may read but not write
+    lst = client.get("/api/routes", headers=admin).json()
+    assert [x["name"] for x in lst][0] == "VIP: Amroha to Delhi" and lst[0]["camera_count"] >= 4
+    up = client.patch(f"/api/routes/{rt['id']}", json={"buffer_m": 100}, headers=admin).json()
+    assert up["camera_count"] < rt["camera_count"]
+    viewer = tok(client, "viewer", "viewer123")
+    assert client.get(f"/api/routes/{rt['id']}", headers=viewer).status_code == 200
+    assert client.patch(f"/api/routes/{rt['id']}", json={"buffer_m": 50}, headers=viewer).status_code == 403
+    # a route that matches nothing says which camera is nearest and what buffer would include it
+    far = client.post("/api/routes", json={"name": "Nowhere near", "waypoints": [{"name": "Lucknow", "lat": 26.85, "lon": 80.95}], "buffer_m": 500}, headers=admin).json()
+    assert far["camera_count"] == 0 and far["nearest"]["id"] == "nh24-amroha" and far["nearest"]["suggest_buffer_m"] == 20000
+    pv = client.post("/api/routes/preview", json={"waypoints": [{"name": "near toll", "lat": 28.92, "lon": 78.47}], "buffer_m": 500}, headers=admin).json()
+    assert pv["camera_count"] == 0 and pv["nearest"]["id"] == "nh24-amroha" and 1600 <= pv["nearest"]["suggest_buffer_m"] <= 2000
+    assert rt["nearest"] is None
+    # drop-down catalogue: areas (from zone / address), saved places, camera sites - all with coordinates; q filters; geocode appends map hits
+    pl = client.get("/api/routes/places", headers=viewer).json()["items"]
+    kinds = {p["kind"] for p in pl}
+    assert {"area", "place", "camera"} <= kinds and all(p["lat"] is not None for p in pl)
+    delhi = next(p for p in pl if p["kind"] == "area" and p["name"] == "Delhi")
+    assert delhi["count"] == 2 and 28.59 < delhi["lat"] < 28.64
+    assert any(p["kind"] == "place" and p["name"] == "Amroha" for p in pl)
+    q = client.get("/api/routes/places?q=hapur", headers=viewer).json()["items"]
+    assert q and all("hapur" in (p["name"] + p["label"]).lower() for p in q) and {"area", "camera"} <= {p["kind"] for p in q}
+    monkeypatch.setattr(RC, "_geocode", lambda q: [{"lat": 28.6, "lon": 77.2, "label": "Janpath, New Delhi, Delhi, India"}])
+    g = client.get("/api/routes/places?q=janpath&geocode=true", headers=viewer).json()["items"]
+    assert g[-1]["kind"] == "map" and g[-1]["name"] == "Janpath" and g[-1]["lat"] == 28.6
+    assert not any(p["kind"] == "map" for p in client.get("/api/routes/places?q=ja&geocode=true", headers=viewer).json()["items"])   # 3+ letters for the map
+    assert client.delete(f"/api/routes/{rt['id']}", headers=admin).status_code == 200
+    assert client.get(f"/api/routes/{rt['id']}", headers=admin).status_code == 404
+    # geometry helper: distance to a polyline and chainage
+    d, ch = corridors.distance_to_path(28.79, 78.10, [[28.903, 78.467], [28.613, 77.209]])
+    assert d < 8000 and 30000 < ch < 60000
+
+
+# ----------------------------------------------------------------------------- camera-only accounts, permission-aware notifications, preferences
+def test_camera_only_user_sees_only_her_cameras_and_notifications(client):
+    from uvp import auth as A
+    from uvp.db import Camera, SessionLocal
+    from uvp.inbox import push, allowed_for
+    with SessionLocal() as s:
+        for cid, dept in (("gate-a", "Police"), ("gate-b", "Police"), ("muni-x", "Municipal")):
+            if s.get(Camera, cid) is None:
+                s.add(Camera(id=cid, name=cid.upper(), department=dept, source_id="registry", status="registered", lat=23.0, lon=72.5))
+        A.create_account(s, "guard.a", "Password1x", "viewer", departments=[], cameras=["gate-a"], created_by="test")   # no department, one camera
+        s.commit()
+    g = tok(client, "guard.a", "Password1x")
+    cams = {c["id"] for c in client.get("/api/cameras", headers=g).json()}
+    assert "gate-a" in cams and "gate-b" not in cams and "muni-x" not in cams
+    me = client.get("/api/auth/me", headers=g).json()
+    assert me["departments"] == [] and me["cameras"] == ["gate-a"]
+    push("alert", "Watchlist hit at gate A", "", department="Police", severity="critical", link="alerts", camera_id="gate-a")
+    push("alert", "Watchlist hit at gate B", "", department="Police", severity="critical", link="alerts", camera_id="gate-b")
+    push("detection", "AI detection note", "", severity="info", link="wall")
+    titles = [n["title"] for n in client.get("/api/notifications?page=1", headers=g).json()["items"]]
+    assert "Watchlist hit at gate A" in titles and "Watchlist hit at gate B" not in titles and "AI detection note" in titles
+    u = A.verify_token(g["Authorization"][7:])
+    assert allowed_for(u, {"kind": "alert", "department": "Police", "camera_id": "gate-a", "severity": "critical"}) is True
+    assert allowed_for(u, {"kind": "alert", "department": "Police", "camera_id": "gate-b", "severity": "critical"}) is False
+    # preferences: only critical alerts, nothing else
+    p = client.put("/api/notifications/preferences", json={"kinds": ["alert"], "min_severity": "critical", "speak": True}, headers=g).json()["preferences"]
+    assert p["kinds"] == ["alert"] and p["min_severity"] == "critical" and p["speak"] is True
+    titles = [n["title"] for n in client.get("/api/notifications?page=1", headers=g).json()["items"]]
+    assert titles == ["Watchlist hit at gate A"]
+    assert allowed_for(u, {"kind": "detection", "department": "*", "severity": "info"}) is False
+    assert client.get("/api/notifications/preferences", headers=g).json()["preferences"]["min_severity"] == "critical"
+    client.put("/api/notifications/preferences", json={"kinds": [], "min_severity": "info"}, headers=g)      # [] = all kinds again
+    assert len(client.get("/api/notifications?page=1", headers=g).json()["items"]) >= 2
+
+
+# ----------------------------------------------------------------------------- Admin -> Permissions (camera permission table)
+def test_camera_permissions_table_applies_live_and_scopes_actions(client):
+    from uvp import auth as A
+    from uvp.db import Camera, SessionLocal
+    admin = tok(client)
+    with SessionLocal() as s:
+        for cid, dept in (("gate-a", "Police"), ("gate-b", "Police"), ("muni-x", "Municipal"), ("muni-y", "Municipal")):
+            if s.get(Camera, cid) is None:
+                s.add(Camera(id=cid, name=cid.upper(), department=dept, source_id="registry", status="registered", lat=23.0, lon=72.5))
+        A.create_account(s, "guard.p", "Password1x", "viewer", departments=[], cameras=[], created_by="test")   # sees nothing on his own
+        s.commit()
+    g = tok(client, "guard.p", "Password1x")
+    assert client.get("/api/cameras", headers=g).json() == []
+    opts = client.get("/api/permissions/options", headers=admin).json()
+    assert {"gate-a", "muni-x"} <= {c["id"] for c in opts["cameras"]} and "Police" in opts["departments"]
+    assert any(u["username"] == "guard.p" for u in opts["users"]) and any(r["name"] == "viewer" for r in opts["roles"])
+    assert [p["id"] for p in opts["perms"]] == ["live", "playback", "export", "search", "alerts", "edit"]
+    # 1. user grant on one camera, live + playback: applies to the existing session at once (no re-login)
+    r = client.post("/api/permissions", json={"scope_kind": "camera", "scope_value": "gate-a", "grantee_kind": "user", "grantee": "guard.p",
+                                              "perms": ["live", "playback"], "reason": "night shift"}, headers=admin)
+    assert r.status_code == 201, r.text
+    row = r.json()
+    assert row["status"] == "active" and row["scope_label"] == "GATE-A" and row["perms"] == ["live", "playback"]
+    cams = {c["id"]: c for c in client.get("/api/cameras", headers=g).json()}
+    assert set(cams) == {"gate-a"} and cams["gate-a"]["perms"] == ["live", "playback"]
+    mine = client.get("/api/permissions/mine", headers=g).json()
+    assert mine["cameras"] == {"gate-a": ["live", "playback"]}
+    # playback allowed on gate-a (the feature came with the permission), export is not
+    assert client.get("/api/cameras/gate-a/recordings", headers=g).status_code == 200
+    assert client.get("/api/cameras/gate-b/recordings", headers=g).status_code == 404
+    me = client.get("/api/auth/me", headers=g).json()
+    assert "playback" in me["features"] and "export" not in me["features"]
+    # 2. role grant on a department: every viewer sees Municipal cameras, live only
+    r2 = client.post("/api/permissions", json={"scope_kind": "department", "scope_value": "Municipal", "grantee_kind": "role", "grantee": "viewer",
+                                               "perms": ["live"]}, headers=admin).json()
+    cams = {c["id"]: c for c in client.get("/api/cameras", headers=g).json()}
+    assert {"gate-a", "muni-x", "muni-y"} <= set(cams) and cams["muni-x"]["perms"] == ["live"] and cams["gate-a"]["perms"] == ["live", "playback"]
+    assert client.get("/api/cameras/muni-x/recordings", headers=g).status_code == 404
+    # an admin's own cameras are untouched by the table (everything the role allows)
+    adm = {c["id"]: c for c in client.get("/api/cameras", headers=admin).json()}
+    assert set(adm["gate-b"]["perms"]) == set(opts and ["live", "playback", "export", "search", "alerts", "edit"])
+    # 3. granting the same scope again replaces the set; patch changes expiry; list filters; validation
+    r3 = client.post("/api/permissions", json={"scope_kind": "camera", "scope_value": "gate-a", "grantee_kind": "user", "grantee": "guard.p",
+                                               "perms": ["live", "export"]}, headers=admin)
+    assert r3.status_code == 201 and r3.json()["id"] == row["id"] and r3.json()["perms"] == ["live", "export"]
+    assert client.get("/api/cameras/gate-a/recordings", headers=g).status_code in (403, 404)     # playback feature gone with the permission
+    lst = client.get("/api/permissions", headers=admin).json()
+    assert lst["total"] == 2 and {x["grantee_kind"] for x in lst["items"]} == {"user", "role"}
+    assert client.get("/api/permissions?grantee_kind=role", headers=admin).json()["total"] == 1
+    assert client.get("/api/permissions?q=guard", headers=admin).json()["total"] == 1
+    assert client.get("/api/permissions?scope=department", headers=admin).json()["items"][0]["scope_value"] == "Municipal"
+    soon = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=2)).isoformat()
+    up = client.patch(f"/api/permissions/{row['id']}", json={"expires_at": soon}, headers=admin).json()
+    assert up["expires_at"] and up["status"] == "active"
+    assert client.post("/api/permissions", json={"scope_kind": "camera", "scope_value": "nope", "grantee_kind": "user", "grantee": "guard.p", "perms": ["live"]}, headers=admin).status_code == 404
+    assert client.post("/api/permissions", json={"scope_kind": "all", "grantee_kind": "role", "grantee": "ghost", "perms": ["live"]}, headers=admin).status_code == 404
+    assert client.post("/api/permissions", json={"scope_kind": "all", "grantee_kind": "user", "grantee": "guard.p", "perms": []}, headers=admin).status_code == 400
+    assert client.post("/api/permissions", json={"scope_kind": "all", "grantee_kind": "user", "grantee": "guard.p", "perms": ["fly"]}, headers=admin).status_code == 400
+    assert client.get("/api/permissions", headers=g).status_code == 403
+    # 4. revoke -> history; access gone immediately
+    assert client.delete(f"/api/permissions/{row['id']}", headers=admin).json()["ok"] is True
+    assert client.delete(f"/api/permissions/{r2['id']}", headers=admin).json()["ok"] is True
+    assert client.get("/api/permissions", headers=admin).json()["total"] == 0
+    hist = client.get("/api/permissions?status=history", headers=admin).json()
+    assert hist["total"] == 2 and all(x["status"] == "revoked" and x["revoked_by"] == "admin" for x in hist["items"])
+    assert client.get("/api/cameras", headers=g).json() == []
+    acts = [a["action"] for a in client.get("/api/audit?limit=50", headers=admin).json()]
+    assert {"perm_grant", "perm_update", "perm_revoke"} <= set(acts)
+    # 5. several scopes at once (two cameras + a department) -> one row each; 'all' swallows the rest
+    m = client.post("/api/permissions", json={"scopes": [{"scope_kind": "camera", "scope_value": "gate-a"}, {"scope_kind": "camera", "scope_value": "gate-b"},
+                                              {"scope_kind": "department", "scope_value": "Municipal"}], "grantee_kind": "user", "grantee": "guard.p", "perms": ["live"]}, headers=admin)
+    assert m.status_code == 201 and m.json()["count"] == 3 and {x["scope_value"] for x in m.json()["items"]} == {"gate-a", "gate-b", "Municipal"}
+    assert {c["id"] for c in client.get("/api/cameras", headers=g).json()} == {"gate-a", "gate-b", "muni-x", "muni-y"}
+    a = client.post("/api/permissions", json={"scopes": [{"scope_kind": "all"}, {"scope_kind": "camera", "scope_value": "gate-a"}], "grantee_kind": "user", "grantee": "guard.p", "perms": ["live"]}, headers=admin).json()
+    assert a["count"] == 1 and a["items"][0]["scope_kind"] == "all"
+    for x in client.get("/api/permissions", headers=admin).json()["items"]:
+        client.delete(f"/api/permissions/{x['id']}", headers=admin)
+    # 6. a VIP route as scope: follows the route's cameras
+    with SessionLocal() as s:
+        for cid, lat, lon in (("rt-1", 28.905, 78.470), ("rt-2", 28.790, 78.100)):
+            if s.get(Camera, cid) is None:
+                s.add(Camera(id=cid, name=cid.upper(), department="Police", source_id="registry", status="registered", lat=lat, lon=lon))
+        s.commit()
+    rt = client.post("/api/routes", json={"name": "Escort NH24", "waypoints": [{"name": "A", "lat": 28.905, "lon": 78.470}, {"name": "B", "lat": 28.790, "lon": 78.100}],
+                                          "buffer_m": 2000, "follow_roads": False}, headers=admin).json()
+    assert {"rt-1", "rt-2"} <= {c["id"] for c in rt["cameras"]}          # (other tests' NH24 cameras may be on the line too)
+    opts = client.get("/api/permissions/options", headers=admin).json()
+    assert any(r["id"] == rt["id"] and r["camera_count"] >= 2 for r in opts["routes"])
+    pr = client.post("/api/permissions", json={"scope_kind": "route", "scope_value": rt["id"], "grantee_kind": "user", "grantee": "guard.p", "perms": ["live", "playback"]}, headers=admin)
+    assert pr.status_code == 201 and pr.json()["scope_label"] == "Route: Escort NH24"
+    cams = {c["id"]: c for c in client.get("/api/cameras", headers=g).json()}
+    assert {"rt-1", "rt-2"} <= set(cams) and "gate-a" not in cams and cams["rt-1"]["perms"] == ["live", "playback"]
+    assert client.get("/api/cameras/rt-2/recordings", headers=g).status_code == 200
+    assert client.post("/api/permissions", json={"scope_kind": "route", "scope_value": "nope", "grantee_kind": "user", "grantee": "guard.p", "perms": ["live"]}, headers=admin).status_code == 404
+    client.delete(f"/api/permissions/{pr.json()['id']}", headers=admin)
+    assert client.get("/api/cameras", headers=g).json() == []
+    titles = [n["title"] for n in client.get("/api/notifications?page=1&kind=security", headers=admin).json()["items"]]
+    assert any(t.startswith("Camera permission granted") for t in titles) and any(t.startswith("Camera permission revoked") for t in titles)
+
+
+# ----------------------------------------------------------------------------- geofences
+def test_geofences_circle_polygon_and_event_notification(client):
+    from uvp import geofences as G
+    from uvp.db import Camera, SessionLocal
+    from uvp.inbox import from_event
+    admin = tok(client)
+    with SessionLocal() as s:
+        for cid, lat, lon in (("gf-in-1", 23.0300, 72.5800), ("gf-in-2", 23.0310, 72.5790), ("gf-out", 23.0900, 72.6500)):
+            if s.get(Camera, cid) is None:
+                s.add(Camera(id=cid, name=cid, department="Police", source_id="registry", status="registered", lat=lat, lon=lon))
+        s.commit()
+    pv = client.post("/api/geofences/preview", json={"kind": "circle", "lat": 23.0305, "lon": 72.5795, "radius_m": 300}, headers=admin).json()
+    assert {c["id"] for c in pv["cameras"]} == {"gf-in-1", "gf-in-2"} and pv["area_km2"] > 0
+    r = client.post("/api/geofences", json={"name": "Paldi circle zone", "kind": "circle", "lat": 23.0305, "lon": 72.5795, "radius_m": 300,
+                                            "notify_kinds": ["alert", "incident"], "severity": "critical"}, headers=admin)
+    assert r.status_code == 201 and r.json()["camera_count"] == 2
+    fid = r.json()["id"]
+    poly = client.post("/api/geofences", json={"name": "East box", "kind": "polygon", "notify_kinds": [], "polygon": [[23.08, 72.64], [23.10, 72.64], [23.10, 72.66], [23.08, 72.66]]}, headers=admin).json()
+    assert [c["id"] for c in poly["cameras"]] == ["gf-out"] and poly["lat"] is not None
+    assert client.post("/api/geofences", json={"name": "bad", "kind": "polygon", "polygon": [[1, 2]]}, headers=admin).status_code == 400
+    assert client.post("/api/geofences", json={"name": "bad", "kind": "circle"}, headers=admin).status_code == 400
+    assert G.point_in_polygon(23.09, 72.65, poly["polygon"]) and not G.point_in_polygon(23.0, 72.5, poly["polygon"])
+    # an alert inside the circle raises a geofence notification; outside does not
+    G._invalidate()
+    from_event("alert", {"id": "a-gf", "plate": "GJ01AB1234", "camera_id": "gf-in-1", "department": "Police", "priority": "high", "match": "exact", "reason": "stolen"})
+    from_event("alert", {"id": "a-gf2", "plate": "GJ01AB9999", "camera_id": "gf-out", "department": "Police", "priority": "high", "match": "exact", "reason": "stolen"})
+    gf = client.get("/api/notifications?page=1&kind=geofence", headers=admin).json()["items"]
+    assert len(gf) == 1 and gf[0]["title"].startswith("Paldi circle zone: watchlist hit GJ01AB1234") and gf[0]["severity"] == "critical" and gf[0]["camera_id"] == "gf-in-1"
+    assert len(client.get("/api/geofences", headers=admin).json()) >= 2
+    up = client.patch(f"/api/geofences/{fid}", json={"radius_m": 50}, headers=admin).json()
+    assert up["camera_count"] == 0
+    assert client.delete(f"/api/geofences/{fid}", headers=tok(client, "viewer", "viewer123")).status_code == 403
+    assert client.delete(f"/api/geofences/{fid}", headers=admin).json()["ok"]
+    acts = [a["action"] for a in client.get("/api/audit?limit=15", headers=admin).json()]
+    assert {"geofence_create", "geofence_update", "geofence_delete"} <= set(acts)
+
+
+def test_geocode_is_biased_to_the_camera_area(monkeypatch):
+    """Nominatim gets a viewbox around the cameras, and a hit inside it wins over a 'more important' one far away."""
+    import requests
+    import uvp.services.routes_registry as RR
+    seen = {}
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [{"lat": "28.6256", "lon": "77.2190", "display_name": "Janpath, New Delhi", "importance": 0.7},
+                    {"lat": "23.0300", "lon": "72.5700", "display_name": "Janpath, Ahmedabad", "importance": 0.2}]
+
+    def fake_get(url, params=None, headers=None, timeout=0):
+        seen.update(params)
+        return R()
+    monkeypatch.setattr(requests, "get", fake_get)
+    out = RR.geocode("Janpath", near=(23.02, 72.57))
+    assert "viewbox" in seen and seen["bounded"] == 0
+    assert out[0]["label"].endswith("Ahmedabad") and out[1]["label"].endswith("New Delhi")
+    seen.clear()
+    out = RR.geocode("Janpath")
+    assert "viewbox" not in seen and out[0]["label"].endswith("New Delhi")

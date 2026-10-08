@@ -22,7 +22,7 @@ log = logging.getLogger("uvp.search")
 class Query:
     plate: str = ""
     fuzzy: bool = False
-    camera_id: str = ""
+    camera_id: str = ""                   # "" = all; "cam-a" or "cam-a,cam-b,cam-c"
     departments: list[str] | None = None  # None = all
     tag: str = ""
     vehicle_type: str = ""
@@ -45,6 +45,9 @@ def event_dict(e: AnprEvent) -> dict:
 class SqlSearch:
     name = "sql"
 
+    def ping(self) -> bool:
+        return True
+
     def index(self, ev: dict) -> None:  # rows are written by the indexer already
         pass
 
@@ -62,8 +65,9 @@ class SqlSearch:
             stmt = stmt.where(AnprEvent.plate.like(like))
         elif q.plate and not q.fuzzy:
             stmt = stmt.where(AnprEvent.plate == pat)
-        if q.camera_id:
-            stmt = stmt.where(AnprEvent.camera_id == q.camera_id)
+        if q.camera_id:                                     # one camera, or several: "cam-a,cam-b"
+            ids = [c.strip() for c in q.camera_id.split(",") if c.strip()]
+            stmt = stmt.where(AnprEvent.camera_id.in_(ids) if len(ids) > 1 else AnprEvent.camera_id == ids[0])
         if q.departments is not None:
             stmt = stmt.where(AnprEvent.department.in_(q.departments))
         if q.since:
@@ -103,6 +107,11 @@ class EsSearch:
                 "vehicle_type": {"type": "keyword"}, "vehicle_colour": {"type": "keyword"}, "plate_colour": {"type": "keyword"},
                 "make_model": {"type": "keyword"}, "plate_valid": {"type": "boolean"}}}})
 
+    def ping(self) -> bool:
+        if not self.es.ping():
+            raise RuntimeError("elasticsearch not reachable")
+        return True
+
     def index(self, ev: dict) -> None:
         month = ev["ts"][:7].replace("-", ".")
         self.es.index(index=f"{self.prefix}-{month}", id=ev["id"], document=ev)
@@ -118,7 +127,8 @@ class EsSearch:
             else:
                 filt.append({"term": {"plate": normalise(p)}})
         if q.camera_id:
-            filt.append({"term": {"camera_id": q.camera_id}})
+            ids = [c.strip() for c in q.camera_id.split(",") if c.strip()]
+            filt.append({"terms": {"camera_id": ids}} if len(ids) > 1 else {"term": {"camera_id": ids[0]}})
         if q.departments is not None:
             filt.append({"terms": {"department": q.departments}})
         if q.tag:

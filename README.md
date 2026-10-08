@@ -15,6 +15,13 @@ Departmental systems (unchanged)          Unified viewing platform
                                                                                               └─► Elasticsearch
 ```
 
+## Deploying (Jenkins → OCIR → OKE)
+
+`DEPLOYMENT.md` is the hand-over for DevOps: one Dockerfile per service (`api/`, `archiver/`, `anpr/`,
+`faces/`, `analytics/`, `adapters/`, `hotlist/`, `indexer/`, `mediamtx/`), ports, environment variables,
+health endpoints, volumes, resources, stateless/stateful list, image tags, and the `Jenkinsfile` that builds,
+pushes and applies `deploy/k8s/manifests.yaml`. The single-VM pilot keeps using `docker-compose.yml`.
+
 ## What is in the box
 
 | Deliverable | Where |

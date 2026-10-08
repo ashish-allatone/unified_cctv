@@ -42,10 +42,28 @@ def env_common(v: dict, extra: dict | None = None) -> list[dict]:
     return env
 
 
+def image_for(v: dict, name: str, spec: dict | None = None) -> str:
+    if spec and spec.get("gpu"):
+        return v["imageGpu"]
+    if v.get("image"):                       # legacy single image
+        return v["image"]
+    return f"{v['registry']}/uvp-{name}:{v['tag']}"
+
+
+def probes(name: str, ports: list[int] | None) -> dict:
+    if name == "api":
+        return {"livenessProbe": {"httpGet": {"path": "/healthz", "port": 8000}, "initialDelaySeconds": 20, "periodSeconds": 15},
+                "readinessProbe": {"httpGet": {"path": "/readyz", "port": 8000}, "initialDelaySeconds": 10, "periodSeconds": 10, "failureThreshold": 3},
+                "startupProbe": {"httpGet": {"path": "/healthz", "port": 8000}, "periodSeconds": 5, "failureThreshold": 36}}
+    port = (ports or [9100])[-1]
+    return {"livenessProbe": {"httpGet": {"path": "/metrics", "port": port}, "initialDelaySeconds": 30, "periodSeconds": 30},
+            "startupProbe": {"httpGet": {"path": "/metrics", "port": port}, "periodSeconds": 10, "failureThreshold": 30}}
+
+
 def deployment(v: dict, name: str, cmd: list[str], spec: dict, env_extra: dict | None = None, ports: list[int] | None = None,
                volumes: bool = True) -> dict:
-    image = v["imageGpu"] if spec.get("gpu") else v["image"]
-    c = {"name": name, "image": image, "command": cmd, "env": env_common(v, env_extra),
+    image = image_for(v, name, spec)
+    c = {"name": name, "image": image, "command": cmd, "env": env_common(v, env_extra), **probes(name, ports),
          "resources": {"requests": {"cpu": spec.get("cpu", "250m"), "memory": spec.get("memory", "512Mi")},
                        "limits": {"cpu": spec.get("cpu", "250m"), "memory": spec.get("memory", "512Mi")}},
          "ports": [{"containerPort": p} for p in (ports or [9100])],
@@ -55,6 +73,8 @@ def deployment(v: dict, name: str, cmd: list[str], spec: dict, env_extra: dict |
     if spec.get("gpu"):
         c["resources"]["limits"]["nvidia.com/gpu"] = 1
     pod = {"containers": [c], "volumes": [{"name": "config", "configMap": {"name": "uvp-config"}}]}
+    if v.get("imagePullSecret"):
+        pod["imagePullSecrets"] = [{"name": v["imagePullSecret"]}]
     if volumes:
         pod["volumes"] += [{"name": "data", "persistentVolumeClaim": {"claimName": "uvp-data"}},
                            {"name": "recordings", "persistentVolumeClaim": {"claimName": "uvp-recordings"}}]
@@ -87,7 +107,8 @@ def render(v: dict) -> list[dict]:
                           "maxReplicas": v["api"]["maxReplicas"], "metrics": [{"type": "Resource", "resource": {"name": "cpu", "target": {"type": "Utilization", "averageUtilization": 70}}}]}})
     # stateless workers
     for name, mod, spec in (("adapters", "adapter_service", v["adapters"]), ("indexer", "indexer", v["indexer"]),
-                            ("archiver", "archiver", v["archiver"]), ("analytics", "analytics_worker", v["analytics"]), ("hotlist", "hotlist_sync", v["hotlist"])):
+                            ("archiver", "archiver", v["archiver"]), ("analytics", "analytics_worker", v["analytics"]),
+                            ("faces", "face_worker", v.get("faces", {"replicas": 1})), ("hotlist", "hotlist_sync", v["hotlist"])):
         docs.append(deployment(v, name, ["python", "-m", f"uvp.services.{mod}"], spec))
     # anpr shards: StatefulSet, ordinal = shard
     n = v["anpr"]["replicas"]
@@ -101,7 +122,10 @@ def render(v: dict) -> list[dict]:
     relay = {"apiVersion": "apps/v1", "kind": "StatefulSet", "metadata": {"name": "relay", "namespace": ns},
              "spec": {"serviceName": "relay", "replicas": v["relays"], "selector": {"matchLabels": {"app": "relay"}},
                       "template": {"metadata": {"labels": {"app": "relay"}},
-                                   "spec": {"containers": [{"name": "mediamtx", "image": "bluenviron/mediamtx:1.15.1-ffmpeg",
+                                   "spec": {**({"imagePullSecrets": [{"name": v["imagePullSecret"]}]} if v.get("imagePullSecret") else {}),
+                                            "containers": [{"name": "mediamtx", "image": v.get("relayImage", "bluenviron/mediamtx:1.15.1-ffmpeg"),
+                                                            "livenessProbe": {"httpGet": {"path": "/v3/paths/list", "port": 9997}, "initialDelaySeconds": 15, "periodSeconds": 20},
+                                                            "readinessProbe": {"httpGet": {"path": "/v3/paths/list", "port": 9997}, "periodSeconds": 10},
                                                             "env": [{"name": "MTX_AUTHHTTPADDRESS", "value": "http://api:8000/internal/relay-auth"},
                                                                     {"name": "TZ", "value": "UTC"},
                                                                     {"name": "MTX_PATHDEFAULTS_RECORDPATH", "value": "/recordings/$(POD_NAME)/%path/%Y-%m-%d_%H-%M-%S-%f"},
@@ -155,8 +179,11 @@ def check(docs: list[dict]) -> list[str]:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--no-secrets", action="store_true", help="leave out the placeholder Secret (CI: secrets are created once by hand)")
     a = ap.parse_args()
     docs = render(load_values())
+    if a.no_secrets:
+        docs = [d for d in docs if d["kind"] != "Secret"]
     problems = check(docs)
     if problems:
         print("\n".join(problems), file=sys.stderr)

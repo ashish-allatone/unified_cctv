@@ -45,7 +45,7 @@ from .. import auth as A
 from ..config import settings
 from ..db import (AccessGrant, AnprEvent, Alert, AuditLog, Camera, EventTag, LegalHold, Recording, SessionLocal,
                   Source, Users, WatchlistEntry, audit, init_db, new_id, utcnow, verify_audit_chain)
-from .. import inbox, pii, rbac, signing
+from .. import camperms, inbox, pii, rbac, signing
 from ..notify import notify
 from .. import metrics as M
 from ..plates import correct, normalise
@@ -80,6 +80,38 @@ def metrics():
     return Response(body, media_type=ctype)
 
 
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    """Liveness: the process answers HTTP. No dependencies are checked."""
+    return {"ok": True, "version": _version()}
+
+
+@app.get("/readyz", include_in_schema=False)
+def readyz():
+    """Readiness: the database answers (hard requirement) and the search index / relay are reported (soft)."""
+    from fastapi import Response
+    from sqlalchemy import text
+    out = {"ok": True, "version": _version(), "database": "ok", "search": "ok", "relay": "ok"}
+    try:
+        with SessionLocal() as s:
+            s.execute(text("SELECT 1"))
+    except Exception as e:  # noqa: BLE001
+        out["ok"], out["database"] = False, f"error: {str(e)[:120]}"
+    try:
+        backend().ping()
+    except Exception as e:  # noqa: BLE001
+        out["search"] = f"degraded: {str(e)[:120]}"
+    try:
+        out["relay"] = "ok" if any(r.healthy for r in relay.relays.values()) else "no healthy relay"
+    except Exception as e:  # noqa: BLE001
+        out["relay"] = f"unknown: {str(e)[:120]}"
+    return out if out["ok"] else Response(json.dumps(out), status_code=503, media_type="application/json")
+
+
+def _version() -> str:
+    return str(getattr(settings, "version", "") or "unknown")
+
+
 # ----------------------------------------------------------------------------- auth helpers (shared with routers)
 from .deps import _ip, current_user, dept_filter, internal, need  # noqa: E402
 
@@ -92,11 +124,13 @@ class Hub:
     async def send(self, msg: dict) -> None:
         dead = []
         for ws, u in list(self.clients.items()):
-            dept = msg.get("department", "")
-            if dept not in ("", "*") and not u.sees(dept):
-                continue
-            if msg.get("type") == "inbox" and msg.get("feature") and not u.has(msg["feature"]):
-                continue
+            if msg.get("type") == "inbox":
+                if not inbox.allowed_for(u, msg):
+                    continue
+            else:
+                dept = msg.get("department", "")
+                if dept not in ("", "*") and not u.sees(dept) and msg.get("camera_id", "") not in (u.cameras or []):
+                    continue
             try:
                 if msg.get("type") == "dets" and not u.has("plate_search"):
                     msg = {**msg, "boxes": [[("plate" if str(b[0]).startswith("plate:") else b[0]), *b[1:]] for b in msg.get("boxes", [])]}
@@ -457,6 +491,7 @@ def cameras(u: A.User = Depends(current_user)):
         if not u.sees_camera(c.id, c.department):
             continue
         d = _cam(c)
+        d["perms"] = [p for p in camperms.PERMS if u.allows(c.id, c.department, p)]
         d["pulling"] = {p: bool(live.get(f"{c.id}/{p}", {}).get("ready")) for p in ("main", "sub")}
         d["relay"] = c.relay or ""
         r = relay.get(c.relay)
@@ -899,7 +934,7 @@ def event_clip(eid: str, request: Request, u: A.User = Depends(need("playback"))
 def camera_recordings(cam_id: str, request: Request, day: str = "", u: A.User = Depends(need("playback"))):
     with SessionLocal() as s:
         cam = s.get(Camera, cam_id)
-        if not cam or not u.sees(cam.department):
+        if not cam or not u.allows(cam.id, cam.department, "playback"):
             raise HTTPException(404)
         d = dt.date.fromisoformat(day) if day else utcnow().date()
         lo = dt.datetime.combine(d, dt.time.min, dt.timezone.utc)
@@ -1120,7 +1155,7 @@ def export_event(eid: str, request: Request, u: A.User = Depends(need("export"))
     """Evidence bundle for one event: watermarked frame + crop + watermarked clip, signed manifest."""
     with SessionLocal() as s:
         e = s.get(AnprEvent, eid)
-        if not e or not u.sees(e.department):
+        if not e or not u.allows(e.camera_id, e.department, "export"):
             raise HTTPException(404)
         cam = s.get(Camera, e.camera_id)
         info = {"event_id": e.id, "plate": e.plate, "camera_id": e.camera_id, "camera_name": cam.name if cam else "",
@@ -1360,6 +1395,17 @@ def _publish_keys() -> dict[str, str]:
     return _pub_cache["keys"]
 
 
+_deny_seen: dict[str, float] = {}
+
+
+def _deny_log(path: str, why: str) -> None:
+    """One WARNING per stream per 30 s saying *why* the relay was told 403 (the access log shows only the status)."""
+    now = time.time()
+    if now - _deny_seen.get(path, 0) > 30:
+        _deny_seen[path] = now
+        log.warning("relay-auth 403 for %s: %s", path, why)
+
+
 @app.post("/internal/relay-auth")
 def relay_auth(b: dict):
     """Called by MediaMTX for every read/publish/api request. 200 = allow, 401/403 = deny.
@@ -1390,7 +1436,8 @@ def relay_auth(b: dict):
         cam = s.get(Camera, cam_id)
         src = s.get(Source, cam.source_id) if cam else None
         cam_ids = {c for (c,) in s.execute(select(Camera.id).where(Camera.source_id == cam.source_id))} if cam else set()
-    if not cam or not u.has("live") or not u.sees_camera(cam.id, cam.department):
+    if not cam or not u.has("live") or not u.allows(cam.id, cam.department, "live"):
+        _deny_log(path, f"{u.username} may not view {cam_id}" + ("" if cam else " (unknown camera)"))
         return JSONResponse({"error": "not permitted"}, status_code=403)
     # Non-interference control: cap concurrent pulls per departmental source.
     live = _safe_live_paths()
@@ -1398,6 +1445,7 @@ def relay_auth(b: dict):
     already = any(p["name"] == base and _is_departmental_pull(p) for p in live)
     active = sum(1 for p in live if _is_departmental_pull(p) and p["name"].split("/")[0] in cam_ids)
     if not already and src and active >= src.max_concurrent_pulls:
+        _deny_log(path, f"source {src.id} at its cap of {src.max_concurrent_pulls} concurrent streams ({active} pulling) - {u.username} asked for {cam_id}")
         return JSONResponse({"error": f"source {src.id} at its cap of {src.max_concurrent_pulls} streams"},
                             status_code=403)
     key = (u.username, path)
@@ -1419,6 +1467,8 @@ from .routes_analysis import router as analysis_router  # noqa: E402
 from .routes_registry import router as registry_router  # noqa: E402
 from .routes_devices import router as devices_router  # noqa: E402
 from .routes_ops2 import router as ops2_router  # noqa: E402
+from .routes_corridors import router as corridors_router  # noqa: E402
+from .routes_perms import router as perms_router  # noqa: E402
 app.include_router(investigation_router)
 app.include_router(analytics_router)
 app.include_router(ops_router)
@@ -1428,6 +1478,8 @@ app.include_router(analysis_router)
 app.include_router(registry_router)
 app.include_router(devices_router)
 app.include_router(ops2_router)
+app.include_router(corridors_router)
+app.include_router(perms_router)
 
 
 # ----------------------------------------------------------------------------- web UI

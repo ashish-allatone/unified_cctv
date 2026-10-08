@@ -206,6 +206,72 @@ def export_case(cid: str, request: Request, u: A.User = Depends(need("export")))
         return FileResponse(z, filename=z.name, media_type="application/zip")
 
 
+# ----------------------------------------------------------------------------- vehicles seen on several cameras
+@router.get("/api/vehicles/multi-camera")
+def multi_camera(since: str | None = None, until: str | None = None, min_cameras: int = 2, cameras: str = "", department: str = "",
+                 vehicle_type: str = "", plate: str = "", limit: int = 200, request: Request = None, u: A.User = Depends(need("movement"))):
+    """Which number plates were read on more than one camera in the window (default: last 24 h; any length - a whole
+    year is fine, the grouping is done in the database). `cameras=a,b` narrows to plates seen on EVERY one of those
+    cameras (e.g. entered at A and left at B); `min_cameras` (default 2) is the minimum number of distinct cameras
+    otherwise. Plates are masked for users without plate_search. Sorted by number of cameras, then most recent."""
+    lo = _parse_time(since) or (utcnow() - dt.timedelta(hours=24))
+    hi = _parse_time(until) or utcnow()
+    if hi <= lo:
+        raise HTTPException(400, "until must be after since")
+    want = {c.strip() for c in cameras.split(",") if c.strip()}
+    limit = max(1, min(limit, 1000))
+    with SessionLocal() as s:
+        cams = {c.id: c for c in s.scalars(select(Camera)) if u.sees_camera(c.id, c.department)}
+        if want and not want <= set(cams):
+            return {"since": lo.isoformat(), "until": hi.isoformat(), "min_cameras": max(2, min_cameras), "cameras": sorted(want), "total": 0, "items": []}
+        base = [AnprEvent.ts >= lo, AnprEvent.ts < hi, AnprEvent.plate_valid.is_(True), AnprEvent.plate != "",
+                AnprEvent.camera_id.in_(list(want) if want else list(cams))]
+        if department:
+            base.append(AnprEvent.department == department)
+        if vehicle_type:
+            base.append(AnprEvent.vehicle_type == vehicle_type)
+        if plate.strip():                                      # GJ01*, *1234, GJ01AB1234 (needs plate_search)
+            if not u.has("plate_search"):
+                raise HTTPException(403, "filtering by plate requires plate_search")
+            base.append(AnprEvent.plate.like("%".join(normalise(x) for x in plate.strip().split("*"))) if "*" in plate else AnprEvent.plate == normalise(plate.strip()))
+        # step 1 (in the database): the plates that qualify - distinct cameras >= N, or == every wanted camera
+        need_n = len(want) if want else max(2, min_cameras)
+        pq = select(AnprEvent.plate, func.count(func.distinct(AnprEvent.camera_id)).label("n"), func.max(AnprEvent.ts).label("last")) \
+            .where(*base).group_by(AnprEvent.plate).having(func.count(func.distinct(AnprEvent.camera_id)) >= need_n) \
+            .order_by(func.count(func.distinct(AnprEvent.camera_id)).desc(), func.max(AnprEvent.ts).desc())
+        total = s.execute(select(func.count()).select_from(pq.subquery())).scalar() or 0
+        plates = [row[0] for row in s.execute(pq.limit(limit)).all()]
+        rows = []
+        if plates:
+            # step 2: per-camera detail for just those plates (all the user's cameras, so the order of passage is complete)
+            dq = select(AnprEvent.plate, AnprEvent.camera_id, func.count(AnprEvent.id), func.min(AnprEvent.ts), func.max(AnprEvent.ts)) \
+                .where(AnprEvent.ts >= lo, AnprEvent.ts < hi, AnprEvent.plate_valid.is_(True), AnprEvent.plate.in_(plates),
+                       AnprEvent.camera_id.in_(list(cams))).group_by(AnprEvent.plate, AnprEvent.camera_id)
+            rows = s.execute(dq).all()
+        if request is not None:
+            audit(s, u.username, "multi_camera_query", "", f"{lo.isoformat()}..{hi.isoformat()} min={min_cameras} cams={','.join(sorted(want))} plates={total}", _ip(request))
+            s.commit()
+    by_plate: dict[str, dict] = {p: {"plate": p, "cameras": {}, "sightings": 0} for p in plates}
+    for plate, cid, n, first, last in rows:
+        d = by_plate[plate]
+        c = cams[cid]
+        d["cameras"][cid] = {"id": cid, "name": c.name, "department": c.department, "sightings": int(n), "first": first, "last": last}
+        d["sightings"] += int(n)
+    out = []
+    for p in plates:                                              # keep the database order (most cameras, newest)
+        d = by_plate[p]
+        cl = sorted(d["cameras"].values(), key=lambda x: x["first"])
+        if not cl:
+            continue
+        first, last = cl[0]["first"], max(x["last"] for x in cl)
+        item = {"plate": d["plate"], "camera_count": len(cl), "sightings": d["sightings"], "first_seen": first.isoformat(), "last_seen": last.isoformat(),
+                "span_min": int((last - first).total_seconds() // 60),
+                "cameras": [{**x, "first": x["first"].isoformat(), "last": x["last"].isoformat()} for x in cl]}
+        out.append(pii.mask_event(item, u))
+    return {"since": lo.isoformat(), "until": hi.isoformat(), "min_cameras": need_n, "cameras": sorted(want),
+            "total": int(total), "items": out, "truncated": total > len(out)}
+
+
 # ----------------------------------------------------------------------------- timeline reconstruction
 @router.get("/api/vehicles/{plate}/timeline")
 def timeline(plate: str, since: str | None = None, until: str | None = None, u: A.User = Depends(need("movement"))):

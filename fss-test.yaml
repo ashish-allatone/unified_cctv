@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: unified-cctv-fss-pv
+spec:
+  capacity:
+    storage: 500Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: unified-cctv-fss
+  csi:
+    driver: fss.csi.oraclecloud.com
+    volumeHandle: "ocid1.filesystem.oc1.ap_mumbai_1.aaaaaaaaaapokrermjxw2llqojxwiotboaww25lnmjqwsljrfvqwiljr:10.0.1.4:/unified-cctv"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: unified-cctv-fss-test
+  namespace: unified-cctv
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: unified-cctv-fss
+  resources:
+    requests:
+      storage: 10Gi

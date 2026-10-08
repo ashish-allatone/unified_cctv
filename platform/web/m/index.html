@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>CCTV Field</title>
+<link rel="manifest" href="/m/manifest.json">
+<link rel="icon" href="/m/icon.svg">
+<link rel="apple-touch-icon" href="/m/icon.svg">
+<link rel="stylesheet" href="/m/styles.css">
+</head>
+<body>
+<header><div><b id="title">CCTV Field</b><div class="small" id="who">not signed in</div></div><button class="ghost" id="logout">Sign out</button></header>
+
+<main id="login">
+  <div class="card">
+    <p class="muted small">Sign in with your control-room account. Alerts, plate lookups and incidents are scoped to your department.</p>
+    <form id="login-form">
+      <input name="username" placeholder="Username" autocomplete="username" required>
+      <input name="password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <div id="mfa-row" class="hidden"><input name="code" inputmode="numeric" placeholder="2FA code" autocomplete="one-time-code"></div>
+      <button class="primary">Sign in</button>
+      <p class="error" id="login-error"></p>
+    </form>
+  </div>
+</main>
+
+<main id="app" class="hidden">
+  <section id="v-alerts"><h3>Alerts <span class="small muted" id="alerts-sub"></span></h3><div id="alerts"></div></section>
+  <section id="v-lookup" class="hidden">
+    <h3>Plate lookup</h3>
+    <form id="lookup-form"><input name="plate" placeholder="MP04ZR7493" autocapitalize="characters" required><button class="primary">Search</button></form>
+    <div id="lookup"></div>
+  </section>
+  <section id="v-incidents" class="hidden"><h3>Incidents</h3><div id="incidents"></div></section>
+  <section id="v-cases" class="hidden"><h3>My cases</h3><div id="cases"></div></section>
+</main>
+
+<nav class="bottom" id="nav">
+  <button data-v="alerts" class="active">Alerts</button><button data-v="lookup">Lookup</button><button data-v="incidents">Incidents</button><button data-v="cases">Cases</button>
+</nav>
+<script src="/m/app.js"></script>
+</body>
+</html>

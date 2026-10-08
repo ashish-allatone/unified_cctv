@@ -406,26 +406,17 @@ _vahan_cache: dict[str, tuple[float, dict]] = {}
 
 @router.get("/api/vehicles/{plate}/registration")
 def registration(plate: str, request: Request, u: A.User = Depends(need("plate_search"))):
-    """Registration details from the state Vahan connector (VAHAN_URL with {plate}); cached 1 h; audited."""
+    """Registration details from the Vahan connector (Admin -> External APIs, or VAHAN_URL); cached; audited."""
+    from .. import integrations
     p = normalise(plate)
-    if not settings.vahan_url:
-        raise HTTPException(501, "Vahan connector not configured (VAHAN_URL)")
-    hit = _vahan_cache.get(p)
-    if hit and time.time() - hit[0] < 3600:
-        data = hit[1]
-    else:
-        headers = json.loads(settings.vahan_headers) if settings.vahan_headers else {}
-        try:
-            r = requests.get(settings.vahan_url.format(plate=p), headers=headers, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-        except requests.RequestException as e:
-            raise HTTPException(502, f"Vahan lookup failed: {e}")
-        _vahan_cache[p] = (time.time(), data)
+    try:
+        res = integrations.lookup("vahan", p)
+    except RuntimeError as e:
+        raise HTTPException(501 if "not configured" in str(e) else 502, str(e))
     with SessionLocal() as s:
         audit(s, u.username, "vahan_lookup", p, "", _ip(request))
         s.commit()
-    return {"plate": p, "registration": data}
+    return {"plate": p, "registration": res["data"], "rows": integrations.flatten(res["data"])[:80]}
 
 
 # ----------------------------------------------------------------------------- licence + version

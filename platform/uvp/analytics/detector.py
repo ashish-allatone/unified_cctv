@@ -6,6 +6,7 @@ ONNX demo (letterbox to 416 with grey 114, raw 0-255 BGR, no normalisation).
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,11 +67,11 @@ class Detector:
         path = Path(model or settings.analytics_model)
         if not path.is_absolute():
             path = ROOT / path
-        so = ort.SessionOptions()
-        so.intra_op_num_threads = threads
-        so.inter_op_num_threads = 1
-        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if settings.anpr_gpu else ["CPUExecutionProvider"]
-        self.sess = ort.InferenceSession(str(path), so, providers=providers)
+        self.path, self.threads = path, threads
+        self._lock = threading.Lock()
+        self._cuda_failures = 0
+        self.on_cpu = not settings.anpr_gpu
+        self.sess = self._open(gpu=settings.anpr_gpu)
         self.input = self.sess.get_inputs()[0].name
         shp = self.sess.get_inputs()[0].shape
         self.size = int(shp[-1]) if isinstance(shp[-1], int) else size
@@ -89,6 +90,53 @@ class Detector:
         else:
             self.family = "yolox"
         log.info("detector %s (%dx%d, %s)", path.name, self.size, self.size, self.family)
+
+    def _open(self, gpu: bool):
+        """Build the ONNX Runtime session. On the GPU the graph optimiser is held at 'basic' by default
+        (ANALYTICS_ORT_OPT=all|extended|basic|none): the extended level fuses attention / layer-norm blocks
+        into CUDA kernels that fault on some models (YOLO12's area attention: 'CUDA failure 716: misaligned
+        address'), after which the whole CUDA context is poisoned."""
+        import onnxruntime as ort
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = self.threads
+        so.inter_op_num_threads = 1
+        level = (settings.analytics_ort_opt or ("basic" if gpu else "all")).lower()
+        so.graph_optimization_level = {"none": ort.GraphOptimizationLevel.ORT_DISABLE_ALL, "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
+                                       "extended": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED}.get(level, ort.GraphOptimizationLevel.ORT_ENABLE_ALL)
+        if gpu:
+            cuda = {"cudnn_conv_algo_search": "HEURISTIC", "arena_extend_strategy": "kSameAsRequested", "do_copy_in_default_stream": "1"}
+            providers = [("CUDAExecutionProvider", cuda), "CPUExecutionProvider"]
+        else:
+            providers = ["CPUExecutionProvider"]
+        sess = ort.InferenceSession(str(self.path), so, providers=providers)
+        if gpu and "CUDAExecutionProvider" not in sess.get_providers():
+            log.warning("CUDA provider not available (%s) - detector runs on the CPU", sess.get_providers())
+            self.on_cpu = True
+        return sess
+
+    def _run(self, x: np.ndarray):
+        """sess.run with CUDA self-healing: a CUDA fault is sticky for the context, so the session is rebuilt;
+        after three faults in a row the detector moves to the CPU provider rather than dropping every frame."""
+        for _ in range(4):
+            try:
+                out = self.sess.run(None, {self.input: x})[0]
+                self._cuda_failures = 0
+                return out
+            except Exception as e:  # noqa: BLE001
+                msg = str(e)
+                if self.on_cpu or "CUDA" not in msg.upper():
+                    raise
+                with self._lock:
+                    self._cuda_failures += 1
+                    if self._cuda_failures >= 3:
+                        log.error("CUDA failed %d times in a row (%s) - detector %s falls back to the CPU provider; "
+                                  "set ANALYTICS_ORT_OPT=none or use a model without attention blocks (YOLO26) for the GPU",
+                                  self._cuda_failures, msg[:160], self.path.name)
+                        self.sess, self.on_cpu = self._open(gpu=False), True
+                    else:
+                        log.warning("CUDA fault (%s) - rebuilding the GPU session for %s", msg[:160], self.path.name)
+                        self.sess = self._open(gpu=True)
+        return self.sess.run(None, {self.input: x})[0]
 
     @staticmethod
     def _grids(size: int):
@@ -142,7 +190,7 @@ class Detector:
 
     def _single_ultra(self, frame: np.ndarray, keep: set[str] | None) -> list[Det]:
         x, r, dx, dy = self._pre_ultra(frame)
-        out = self.sess.run(None, {self.input: x})[0]
+        out = self._run(x)
         h, w = frame.shape[:2]
         dets: list[Det] = []
         if self.family == "ultralytics_e2e":                 # [1, 300, 6] xyxy, score, class
@@ -177,7 +225,7 @@ class Detector:
         if self.family != "yolox":
             return self._single_ultra(frame, keep)
         x, r = self._pre(frame)
-        out = self.sess.run(None, {self.input: x})[0][0]
+        out = self._run(x)[0]
         out[:, :2] = (out[:, :2] + self._grid) * self._stride
         out[:, 2:4] = np.exp(out[:, 2:4]) * self._stride
         scores = out[:, 4:5] * out[:, 5:]

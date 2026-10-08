@@ -187,6 +187,11 @@ def all_sources() -> dict:
         cfg["sources"] += [sc for sc in db_sources() if sc["id"] not in ids]
     except Exception:  # noqa: BLE001
         log.exception("could not load console-managed devices")
+    try:
+        from .channel_scan import apply_overrides
+        cfg = apply_overrides(cfg)             # channel counts raised from the console / auto-scan
+    except Exception:  # noqa: BLE001
+        log.exception("could not apply source overrides")
     return cfg
 
 
@@ -198,7 +203,8 @@ def db_sources_changed() -> bool:
     global _db_sources_seen
     try:
         from .devices import db_sources_version
-        v = db_sources_version()
+        from .channel_scan import overrides_version
+        v = db_sources_version() + overrides_version()
     except Exception:  # noqa: BLE001
         return False
     if v != _db_sources_seen:
@@ -450,6 +456,12 @@ def main() -> None:
             if time.time() >= next_sync or db_sources_changed():
                 sync_once()
                 next_sync = time.time() + settings.sync_interval_s
+                try:
+                    from .channel_scan import auto_scan_tick
+                    if auto_scan_tick(all_sources()):
+                        next_sync = 0.0        # new channels: sync again right away
+                except Exception:  # noqa: BLE001
+                    log.exception("auto-scan failed")
             else:
                 ping_once()
         except Exception:  # noqa: BLE001
