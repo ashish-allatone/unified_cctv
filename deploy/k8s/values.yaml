@@ -4,8 +4,7 @@ namespace: unified-cctv
 image: registry.example.gov.in/uvp/platform:0.1
 imageGpu: registry.example.gov.in/uvp/platform-gpu:0.1
 publicHost: cctv.example.gov.in
-#storageClass: standard
-storageClass: oci-bv    # change according to oci
+storageClass: standard
 # Managed / HA data services (see docs/ha.md): the platform never runs these itself in production
 database_url: postgresql+psycopg://uvp:CHANGE@postgres-primary.db.svc:5432/uvp
 kafka_bootstrap: kafka-0.kafka.svc:9092,kafka-1.kafka.svc:9092,kafka-2.kafka.svc:9092
@@ -20,4 +19,4 @@ archiver: {replicas: 1}
 adapters: {replicas: 1}
 indexer: {replicas: 2}
 hotlist: {replicas: 1}
-keda: false                  # ScaledObject for the indexer on Kafka lag (needs KEDA installed)
+keda: true                   # ScaledObject for the indexer on Kafka lag (needs KEDA installed)
