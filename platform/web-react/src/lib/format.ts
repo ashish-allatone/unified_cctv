@@ -8,3 +8,12 @@ export function ago(iso: string) {
 }
 export const toIso = (v: string) => (v ? new Date(v).toISOString() : "");
 export const toLocalInput = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+export function fmtBytes(b?: number | null): string {
+  if (!b || b <= 0) return "0 B";
+  if (b >= 1e12) return `${(b / 1e12).toFixed(2)} TB`;
+  if (b >= 1e9) return `${(b / 1e9).toFixed(2)} GB`;
+  if (b >= 1e6) return `${(b / 1e6).toFixed(1)} MB`;
+  if (b >= 1e3) return `${Math.round(b / 1e3)} KB`;
+  return `${b} B`;
+}

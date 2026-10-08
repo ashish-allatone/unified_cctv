@@ -7,5 +7,5 @@ export default function AdminLegacy() {
   const frame = useRef<HTMLIFrameElement>(null);
   const initial = useRef(section);
   useEffect(() => { if (section !== initial.current) frame.current?.contentWindow?.postMessage({ type: "uvp:show", view: "admin", sec: section }, location.origin); }, [section]);
-  return <iframe ref={frame} className="legacy-frame" style={{ height: "calc(100vh - 140px)", borderRadius: 12 }} title={`admin ${section}`} src={`/legacy/?embed=1#view=admin&sec=${initial.current}`} />;
+  return <iframe ref={frame} className="legacy-frame" style={{ height: "calc(100vh - 190px)", minHeight: 600, borderRadius: 10 }} title={`admin ${section}`} src={`/legacy/?embed=1#view=admin&sec=${initial.current}`} />;
 }

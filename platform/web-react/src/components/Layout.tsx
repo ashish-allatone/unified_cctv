@@ -8,6 +8,7 @@ import { api } from "../lib/api";
 import { getTheme, toggleTheme } from "../lib/theme";
 import { ago } from "../lib/format";
 import { toast } from "../lib/toast";
+import { ADMIN_SECTIONS } from "../pages/admin/AdminLayout";
 
 const Sun = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>;
 const Moon = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>;
@@ -28,6 +29,13 @@ export default function Layout() {
   const [bellOpen, setBellOpen] = useState(false);
   const [latest, setLatest] = useState<Notif[]>([]);
   const [alertsOpen, setAlertsOpen] = useState(0);
+  const [adminOpen, setAdminOpen] = useState(() => loc.pathname.startsWith("/admin"));
+
+  useEffect(() => {
+    if (loc.pathname.startsWith("/admin")) {
+      setAdminOpen(true);
+    }
+  }, [loc.pathname]);
 
   const refreshInbox = useCallback(async () => {
     try { const r = await api("/api/notifications/unread"); setUnread(r.unread ?? r.count ?? 0); } catch { /* */ }
@@ -60,13 +68,110 @@ export default function Layout() {
           {NAV.map((g) => (
             <div key={g.label}>
               <div className="group">{t(g.i18n, g.label)}</div>
-              {g.items.filter((i) => visible(i.feature)).map((i) => (
-                <NavLink key={i.view} to={`/${i.view}`} className={({ isActive }) => (isActive ? "active" : "")} title={i.label} style={{ display: "flex" }}>
-                  {i.icon}<span>{t(i.i18n, i.label)}</span>
-                  {i.view === "alerts" && alertsOpen > 0 && <span className="badge">{alertsOpen}</span>}
-                  {i.view === "notifications" && unread > 0 && <span className="badge">{unread > 99 ? "99+" : unread}</span>}
-                </NavLink>
-              ))}
+              {g.items.filter((i) => visible(i.feature)).map((i) => {
+                if (i.view === "admin") {
+                  const isAdminActive = loc.pathname.startsWith("/admin");
+                  return (
+                    <div key={i.view} className="admin-nav-group">
+                      <NavLink
+                        to="/admin"
+                        className={`admin-nav-main-link ${isAdminActive ? "active" : ""}`}
+                        title={i.label}
+                        onClick={() => setAdminOpen(true)}
+                      >
+                        {i.icon}
+                        <span className="nav-main-text">{t(i.i18n, i.label)}</span>
+                        <span
+                          className={`admin-toggle-badge ${adminOpen ? "open" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setAdminOpen(!adminOpen);
+                          }}
+                          title={adminOpen ? "Collapse sub menu" : "Expand sub menu"}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="toggle-svg-ico">
+                            {adminOpen ? (
+                              <line x1="5" y1="12" x2="19" y2="12" />
+                            ) : (
+                              <>
+                                <line x1="12" y1="5" x2="12" y2="19" />
+                                <line x1="5" y1="12" x2="19" y2="12" />
+                              </>
+                            )}
+                          </svg>
+                        </span>
+                      </NavLink>
+                      {adminOpen && !rail && (
+                        <div className="admin-side-submenu" role="menu" aria-label="Admin sub menu">
+                          {ADMIN_SECTIONS.map((cat) => {
+                            const isCatActive =
+                              isAdminActive &&
+                              cat.items.some(
+                                (it) =>
+                                  loc.pathname === `/admin/${it.id}` ||
+                                  (loc.pathname === `/admin` && cat.id === "access")
+                              );
+                            return (
+                              <NavLink
+                                key={cat.id}
+                                to={`/admin/${cat.items[0].id}`}
+                                className={`admin-subcat-link ${isCatActive ? "active" : ""}`}
+                                title={cat.desc}
+                              >
+                                {cat.iconName === "access" && (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="admin-subcat-ico">
+                                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                                  </svg>
+                                )}
+                                {cat.iconName === "data" && (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="admin-subcat-ico">
+                                    <ellipse cx="12" cy="5" rx="9" ry="3" />
+                                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+                                  </svg>
+                                )}
+                                {cat.iconName === "integrations" && (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="admin-subcat-ico">
+                                    <rect x="2" y="2" width="20" height="8" rx="2" />
+                                    <rect x="2" y="14" width="20" height="8" rx="2" />
+                                  </svg>
+                                )}
+                                {cat.iconName === "overview" && (
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="admin-subcat-ico">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                    <polyline points="22 4 12 14.01 9 11.01" />
+                                  </svg>
+                                )}
+                                <span className="subcat-title">{cat.group}</span>
+                              </NavLink>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <NavLink
+                    key={i.view}
+                    to={`/${i.view}`}
+                    className={({ isActive }) => (isActive ? "active" : "")}
+                    title={i.label}
+                    style={{ display: "flex" }}
+                  >
+                    {i.icon}
+                    <span>{t(i.i18n, i.label)}</span>
+                    {i.view === "alerts" && alertsOpen > 0 && <span className="badge">{alertsOpen}</span>}
+                    {i.view === "notifications" && unread > 0 && (
+                      <span className="badge">{unread > 99 ? "99+" : unread}</span>
+                    )}
+                  </NavLink>
+                );
+              })}
             </div>
           ))}
         </nav>

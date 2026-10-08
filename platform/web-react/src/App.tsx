@@ -11,6 +11,10 @@ import AdminLayout from "./pages/admin/AdminLayout";
 import Permissions from "./pages/admin/Permissions";
 import Users from "./pages/admin/Users";
 import Roles from "./pages/admin/Roles";
+import Archival from "./pages/admin/Archival";
+import Dpdp from "./pages/admin/Dpdp";
+import NotifyAdmin from "./pages/admin/NotifyAdmin";
+import ApiKeysAdmin from "./pages/admin/ApiKeysAdmin";
 import AdminLegacy from "./pages/admin/AdminLegacy";
 
 function Shell() {
@@ -27,6 +31,10 @@ function Shell() {
             <Route path="permissions" element={<Permissions />} />
             <Route path="users" element={<Users />} />
             <Route path="roles" element={<Roles />} />
+            <Route path="archival" element={<Archival />} />
+            <Route path="dpdp" element={<Dpdp />} />
+            <Route path="notify" element={<NotifyAdmin />} />
+            <Route path="keys" element={<ApiKeysAdmin />} />
             <Route path=":section" element={<AdminLegacy />} />
           </Route>
           <Route path=":view" element={<LegacyView />} />
