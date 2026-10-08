@@ -4,7 +4,7 @@ Face detection + recognition against the persons-of-interest gallery on cameras 
 
 | | |
 |---|---|
-| Image | `<OCIR>/uvp-faces:1.9.10` (built with `docker build -f faces/Dockerfile .` from the repository root) |
+| Image | `<OCIR>/uvp-faces:2.0.0` (built with `docker build -f faces/Dockerfile .` from the repository root) |
 | Command | `["python", "-m", "uvp.services.face_worker"]` |
 | Code | `platform/uvp/services/face_worker.py` (shared package `platform/uvp`; `src/main.py` is the entrypoint shim) |
 | Ports | 9100/tcp (/metrics) |

@@ -472,3 +472,10 @@ select[multiple] { min-height: 70px; }
 .campick-item { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; }
 .campick-item:hover, .campick-item.on { background: var(--panel2); }
 .campick-item input { width: 16px; height: 16px; min-height: 0; accent-color: var(--accent); }
+
+/* embedded in the React shell: no chrome of its own, the view fills the iframe */
+html.embedded #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "banner" "main"; }
+html.embedded .sidebar, html.embedded .topbar, html.embedded .skip-link { display: none !important; }
+html.embedded .view { padding-top: 12px; }
+html.embedded .admin-layout { grid-template-columns: minmax(0, 1fr); }
+html.embedded #admin-nav { display: none; }

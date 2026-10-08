@@ -12,3 +12,6 @@ deploy/licensing/vendor_private.pem
 *.whl
 *.tar.gz
 *.zip
+platform/web-react/node_modules/
+platform/web-react/dist/
+.venv-yolo/

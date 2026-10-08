@@ -4,7 +4,7 @@ Vehicle / people counting, crowd, intrusion, abandoned object, parking, red-ligh
 
 | | |
 |---|---|
-| Image | `<OCIR>/uvp-analytics:1.9.10` (built with `docker build -f analytics/Dockerfile .` from the repository root) |
+| Image | `<OCIR>/uvp-analytics:2.0.0` (built with `docker build -f analytics/Dockerfile .` from the repository root) |
 | Command | `["python", "-m", "uvp.services.analytics_worker"]` |
 | Code | `platform/uvp/services/analytics_worker.py` (shared package `platform/uvp`; `src/main.py` is the entrypoint shim) |
 | Ports | 9100/tcp (/metrics) |

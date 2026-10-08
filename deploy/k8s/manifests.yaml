@@ -382,7 +382,7 @@ spec:
     spec:
       containers:
       - name: api
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-api:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-api:2.0.0
         command:
         - python
         - -m
@@ -576,7 +576,7 @@ spec:
     spec:
       containers:
       - name: adapters
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-adapters:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-adapters:2.0.0
         command:
         - python
         - -m
@@ -724,7 +724,7 @@ spec:
     spec:
       containers:
       - name: indexer
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-indexer:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-indexer:2.0.0
         command:
         - python
         - -m
@@ -872,7 +872,7 @@ spec:
     spec:
       containers:
       - name: archiver
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-archiver:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-archiver:2.0.0
         command:
         - python
         - -m
@@ -1020,7 +1020,7 @@ spec:
     spec:
       containers:
       - name: analytics
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-analytics:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-analytics:2.0.0
         command:
         - python
         - -m
@@ -1168,7 +1168,7 @@ spec:
     spec:
       containers:
       - name: faces
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-faces:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-faces:2.0.0
         command:
         - python
         - -m
@@ -1316,7 +1316,7 @@ spec:
     spec:
       containers:
       - name: hotlist
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-hotlist:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-hotlist:2.0.0
         command:
         - python
         - -m
@@ -1464,7 +1464,7 @@ spec:
     spec:
       containers:
       - name: anpr
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-anpr:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-anpr:2.0.0
         command:
         - sh
         - -c
@@ -1623,7 +1623,7 @@ spec:
       - name: ocir-pull
       containers:
       - name: mediamtx
-        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-relay:1.9.10
+        image: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-relay:2.0.0
         livenessProbe:
           httpGet:
             path: /v3/paths/list

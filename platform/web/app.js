@@ -19,7 +19,7 @@ function bind(sel, ev, fn) { const el = $(sel); if (el) el[ev] = fn; else consol
 const I18N = { lang: "en", dict: {} };
 const t = (k, fallback) => I18N.dict[k] || fallback || k;
 async function setLang(lang) {
-  try { I18N.dict = await fetch(`/i18n/${lang}.json`).then((r) => r.json()); I18N.lang = lang; } catch (_) { I18N.dict = {}; I18N.lang = "en"; }
+  try { I18N.dict = await fetch(`i18n/${lang}.json`).then((r) => r.json()); I18N.lang = lang; } catch (_) { I18N.dict = {}; I18N.lang = "en"; }
   try { localStorage.setItem("uvp-lang", I18N.lang); } catch (_) {}
   document.documentElement.lang = I18N.lang;
   $$("[data-i18n]").forEach((el) => { const v = I18N.dict[el.dataset.i18n]; if (v) el.textContent = v; });
@@ -29,6 +29,16 @@ const has = (feature) => !!(S.user && (S.user.features || []).includes(feature))
 // per-camera permission (Admin -> Permissions): cameras list each one's perms; a camera without the list allows everything the role does
 const camAllows = (camId, perm) => { const c = S.camById && S.camById[camId]; return !c || !Array.isArray(c.perms) || c.perms.includes(perm); };
 const setSession = (j) => { S.token = j.token; S.user = j.user; sessionStorage.setItem("uvp", JSON.stringify({ token: S.token, user: S.user })); };
+
+// Embedded mode: the React shell (platform/web-react) shows a legacy page inside an iframe at /legacy/?embed=1#view=<name>.
+// The sidebar / topbar are hidden, the view fills the frame, and view changes are mirrored to the parent.
+const EMBED = new URLSearchParams(location.search).get("embed") === "1";
+if (EMBED) document.documentElement.classList.add("embedded");
+window.addEventListener("message", (e) => {
+  if (e.origin !== location.origin || !e.data || e.data.type !== "uvp:show") return;
+  if (e.data.sec) { try { localStorage.setItem("uvp-admin-sec", e.data.sec); } catch (_) {} ADMIN_SEC = e.data.sec; }
+  if (S.user && typeof show === "function" && $(`#tabs button[data-view="${e.data.view}"]`)) show(e.data.view);
+});
 
 let API_DOWN_TOAST = 0;
 async function api(path, opts = {}) {
@@ -142,6 +152,7 @@ async function mfaDisableFromApp(st) {
 function logout() {
   sessionStorage.removeItem("uvp");
   S.tiles.forEach(stopTile);
+  if (EMBED) { try { parent.postMessage({ type: "uvp:logout" }, location.origin); } catch (_) {} }
   location.reload();
 }
 
@@ -174,6 +185,10 @@ async function start() {
   setInterval(refreshAccess, 60000);
   let last = "overview";
   try { last = localStorage.getItem("uvp-view") || "overview"; } catch (_) {}
+  const hp = new URLSearchParams(location.hash.slice(1));                              // /legacy/?embed=1#view=admin&sec=holds
+  const wanted = hp.get("view");
+  if (wanted && $(`#tabs button[data-view="${wanted}"]`)) last = wanted;
+  if (hp.get("sec")) { ADMIN_SEC = hp.get("sec"); try { localStorage.setItem("uvp-admin-sec", ADMIN_SEC); } catch (_) {} }
   if (!$(`#tabs button[data-view="${last}"]`) || $(`#tabs button[data-view="${last}"]`).classList.contains("hidden")) last = "wall";
   show(last);
 }
@@ -565,7 +580,8 @@ function show(view) {
   if (btn && $("#page-title")) $("#page-title").textContent = btn.querySelector("span")?.textContent || view;
   if ($("#page-sub")) $("#page-sub").textContent = { wall: `${S.tiles.filter((t) => t.cam).length} feeds`, overview: new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" }) }[view] || "";
   S.view = view;
-  try { localStorage.setItem("uvp-view", view); } catch (_) {}
+  if (EMBED) { try { parent.postMessage({ type: "uvp:view", view }, location.origin); } catch (_) {} }
+  else { try { localStorage.setItem("uvp-view", view); } catch (_) {} }
   ({ overview: loadOverview, search: loadSearch, alerts: loadAlerts, watchlist: loadWatchlist, upload: loadUploads, registry: loadRegistry, counts: loadCountsView, sources: loadSources, audit: loadAudit, playback: loadPlayback, admin: loadAdmin, notifications: loadNotifications, reports: loadReports, cases: loadCases, map: loadMap, movement: loadMovementCases, multicam: loadMulti, violations: loadViolations }[view] || (() => {}))();
 }
 

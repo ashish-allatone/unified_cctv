@@ -4,7 +4,7 @@ Cuts event clips from the relay recording buffer, copies clips / crops / segment
 
 | | |
 |---|---|
-| Image | `<OCIR>/uvp-archiver:1.9.10` (built with `docker build -f archiver/Dockerfile .` from the repository root) |
+| Image | `<OCIR>/uvp-archiver:2.0.0` (built with `docker build -f archiver/Dockerfile .` from the repository root) |
 | Command | `["python", "-m", "uvp.services.archiver"]` |
 | Code | `platform/uvp/services/archiver.py` (shared package `platform/uvp`; `src/main.py` is the entrypoint shim) |
 | Ports | 9100/tcp (Prometheus /metrics; also the liveness probe) |

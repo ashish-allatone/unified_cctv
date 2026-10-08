@@ -93,6 +93,7 @@ class Settings:
     rules_file: Path = Path(_env("RULES_FILE", str(ROOT / "config" / "rules.yaml")))
     data_dir: Path = Path(_env("DATA_DIR", str(ROOT / "data")))
     web_dir: Path = Path(_env("WEB_DIR", str(ROOT / "platform" / "web")))
+    web_react_dir: Path = Path(_env("WEB_REACT_DIR", str(ROOT / "platform" / "web-react" / "dist")))   # React console build; when present it is served at / and the legacy console at /legacy/
 
     anpr_fps: float = float(_env("ANPR_FPS", "4"))
     anpr_threads: int = int(_env("ANPR_THREADS", "1"))

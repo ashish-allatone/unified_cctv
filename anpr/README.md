@@ -4,7 +4,7 @@ Licence-plate detection + OCR on ANPR cameras; publishes plate events to Kafka. 
 
 | | |
 |---|---|
-| Image | `<OCIR>/uvp-anpr:1.9.10` (built with `docker build -f anpr/Dockerfile .` from the repository root) |
+| Image | `<OCIR>/uvp-anpr:2.0.0` (built with `docker build -f anpr/Dockerfile .` from the repository root) |
 | Command | `["python", "-m", "uvp.services.anpr_worker"]` |
 | Code | `platform/uvp/services/anpr_worker.py` (shared package `platform/uvp`; `src/main.py` is the entrypoint shim) |
 | Ports | 9100/tcp (/metrics) |

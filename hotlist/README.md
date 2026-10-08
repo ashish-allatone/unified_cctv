@@ -4,7 +4,7 @@ Pulls external stolen / wanted vehicle feeds (NCRB / Vahan style) into the watch
 
 | | |
 |---|---|
-| Image | `<OCIR>/uvp-hotlist:1.9.10` (built with `docker build -f hotlist/Dockerfile .` from the repository root) |
+| Image | `<OCIR>/uvp-hotlist:2.0.0` (built with `docker build -f hotlist/Dockerfile .` from the repository root) |
 | Command | `["python", "-m", "uvp.services.hotlist_sync"]` |
 | Code | `platform/uvp/services/hotlist_sync.py` (shared package `platform/uvp`; `src/main.py` is the entrypoint shim) |
 | Ports | 9100/tcp (/metrics) |

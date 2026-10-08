@@ -1,7 +1,13 @@
-# Deployment guide — Unified CCTV by Allatone (v1.9.10)
+# Deployment guide — Unified CCTV by Allatone (v2.0.0)
 
 For the DevOps flow **Git → Jenkins → Docker build → OCIR push → OKE deployment → Pod**. Everything a
 deployment engineer needs is in this file; the application behaviour is in `README.md` and `docs/`.
+
+## Console (React)
+
+`platform/web-react` is built by a Node stage inside the `api`/platform Dockerfiles (`npm ci && npm run build` → `dist/`), copied
+into the image and served by the API at `/`; the legacy console is served at `/legacy/`. No separate frontend container, port or
+nginx. Local build: `cd platform/web-react && npm install && npm run build`.
 
 ## 1. Repository layout
 
@@ -28,7 +34,7 @@ unified-cctv/
 ├── docker-compose.yml        current single-VM deployment (service dependencies, ports, volumes, env)
 ├── Jenkinsfile               build all images -> push to OCIR -> render manifests -> kubectl apply
 ├── scripts/, tests/, docs/, simulators/
-└── VERSION                   image tag (1.9.10)
+└── VERSION                   image tag (2.0.0)
 ```
 
 **Build context is always the repository root**: `docker build -f api/Dockerfile .` — the service
@@ -39,15 +45,15 @@ per service: all eight services import the same `uvp` package, so one bug-fix is
 
 | Service | Image (OCIR) | Dockerfile | Command | Ports | Replicas | Health |
 |---|---|---|---|---|---|---|
-| api | `uvp-api:1.9.10` | `api/Dockerfile` | `python -m uvicorn uvp.services.api:app --host 0.0.0.0 --port 8000 --workers 2` | **8000/tcp** HTTP (console, `/api/*`, `/ws/alerts`, `/internal/relay-auth`, `/metrics`) | 2 (HPA to 6) | `GET /healthz` live · `GET /readyz` ready (503 when the DB is down) |
-| indexer | `uvp-indexer:1.9.10` | `indexer/Dockerfile` | `python -m uvp.services.indexer` | 9100/tcp `/metrics` | 2 (KEDA on Kafka lag) | `GET :9100/metrics` |
-| adapters | `uvp-adapters:1.9.10` | `adapters/Dockerfile` | `python -m uvp.services.adapter_service` | 9100/tcp | **1** | `GET :9100/metrics` |
-| anpr | `uvp-anpr:1.9.10` (or `uvp-anpr-gpu`) | `anpr/Dockerfile` / `platform/Dockerfile.gpu` | `python -m uvp.services.anpr_worker` (`ANPR_SHARD=<ordinal>/<replicas>`) | 9100/tcp | 2+ (StatefulSet, one shard per pod) | `GET :9100/metrics` |
-| analytics | `uvp-analytics:1.9.10` | `analytics/Dockerfile` | `python -m uvp.services.analytics_worker` | 9100/tcp | 1 | `GET :9100/metrics` |
-| faces | `uvp-faces:1.9.10` | `faces/Dockerfile` | `python -m uvp.services.face_worker` | 9100/tcp | 1 | `GET :9100/metrics` |
-| archiver | `uvp-archiver:1.9.10` | `archiver/Dockerfile` | `python -m uvp.services.archiver` | 9100/tcp | **1** | `GET :9100/metrics` |
-| hotlist | `uvp-hotlist:1.9.10` | `hotlist/Dockerfile` | `python -m uvp.services.hotlist_sync` | 9100/tcp | **1** | `GET :9100/metrics` |
-| relay (mediamtx) | `uvp-relay:1.9.10` = `bluenviron/mediamtx:1.15.1-ffmpeg` + config | `mediamtx/Dockerfile` | image default | 8554 RTSP · 8889 WHEP · 8189 udp+tcp WebRTC media · 8888 HLS · 9997 API · 9996 playback · 9998 metrics | 2 (StatefulSet) | `GET :9997/v3/paths/list` |
+| api | `uvp-api:2.0.0` | `api/Dockerfile` | `python -m uvicorn uvp.services.api:app --host 0.0.0.0 --port 8000 --workers 2` | **8000/tcp** HTTP (console, `/api/*`, `/ws/alerts`, `/internal/relay-auth`, `/metrics`) | 2 (HPA to 6) | `GET /healthz` live · `GET /readyz` ready (503 when the DB is down) |
+| indexer | `uvp-indexer:2.0.0` | `indexer/Dockerfile` | `python -m uvp.services.indexer` | 9100/tcp `/metrics` | 2 (KEDA on Kafka lag) | `GET :9100/metrics` |
+| adapters | `uvp-adapters:2.0.0` | `adapters/Dockerfile` | `python -m uvp.services.adapter_service` | 9100/tcp | **1** | `GET :9100/metrics` |
+| anpr | `uvp-anpr:2.0.0` (or `uvp-anpr-gpu`) | `anpr/Dockerfile` / `platform/Dockerfile.gpu` | `python -m uvp.services.anpr_worker` (`ANPR_SHARD=<ordinal>/<replicas>`) | 9100/tcp | 2+ (StatefulSet, one shard per pod) | `GET :9100/metrics` |
+| analytics | `uvp-analytics:2.0.0` | `analytics/Dockerfile` | `python -m uvp.services.analytics_worker` | 9100/tcp | 1 | `GET :9100/metrics` |
+| faces | `uvp-faces:2.0.0` | `faces/Dockerfile` | `python -m uvp.services.face_worker` | 9100/tcp | 1 | `GET :9100/metrics` |
+| archiver | `uvp-archiver:2.0.0` | `archiver/Dockerfile` | `python -m uvp.services.archiver` | 9100/tcp | **1** | `GET :9100/metrics` |
+| hotlist | `uvp-hotlist:2.0.0` | `hotlist/Dockerfile` | `python -m uvp.services.hotlist_sync` | 9100/tcp | **1** | `GET :9100/metrics` |
+| relay (mediamtx) | `uvp-relay:2.0.0` = `bluenviron/mediamtx:1.15.1-ffmpeg` + config | `mediamtx/Dockerfile` | image default | 8554 RTSP · 8889 WHEP · 8189 udp+tcp WebRTC media · 8888 HLS · 9997 API · 9996 playback · 9998 metrics | 2 (StatefulSet) | `GET :9997/v3/paths/list` |
 
 Infrastructure (not built by us — use OCI managed services or your own charts):
 

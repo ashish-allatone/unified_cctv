@@ -281,3 +281,15 @@ been archived to cold storage and are not searched here.
   accept the comma-separated list.
 - **Multi-camera → Plate (optional)**: narrow the multi-camera list to a plate or pattern (`GJ01*`, `*1234`);
   needs `plate_search`.
+
+
+## v2.0 — React console (phase 1)
+
+The console now has a **React + TypeScript shell** (`platform/web-react`, Vite): login (password, 2FA, first-run
+sign-up, SSO return), sidebar / topbar / bell / live WebSocket / Hindi-Gujarati / theme, and these pages rebuilt in
+React — **Notifications** (dashboard, list, preferences) and **Admin → Permissions, Users, Roles & permissions**.
+Every other page opens the existing console inside the shell (`/legacy/`, same session) until it is rebuilt, so
+nothing is lost: the sidebar, URL (`/map`, `/admin/holds`, …) and permissions behave the same everywhere.
+Look and feel are unchanged (the same `styles.css`). Build happens inside the Docker image (Node stage), so
+`docker compose build api && docker compose up -d api` deploys it; the API serves React at `/` and the legacy console
+at `/legacy/`. Details and how to migrate the next page: `platform/web-react/README.md`.

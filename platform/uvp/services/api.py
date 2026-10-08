@@ -1484,14 +1484,47 @@ app.include_router(perms_router)
 
 # ----------------------------------------------------------------------------- web UI
 WEB = Path(settings.web_dir)
-if WEB.exists():
+REACT = Path(settings.web_react_dir)
+
+
+def _legacy_html():
+    """Legacy console entry: assets carry the build version so a new build is never served from a stale browser cache."""
+    from fastapi import Response
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    v = settings.version
+    html = html.replace('href="styles.css"', f'href="styles.css?v={v}"').replace('src="app.js"', f'src="app.js?v={v}"')
+    return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+if WEB.exists() and (REACT / "index.html").exists():
+    # React console (platform/web-react, built with `npm run build`) at /, the legacy console at /legacy/ (pages the
+    # React shell has not rebuilt yet open it in an iframe). /m/ (field app) and /legacy/brand keep their paths.
+    @app.get("/legacy/", include_in_schema=False)
+    def _legacy_index():
+        return _legacy_html()
+
+    @app.get("/legacy", include_in_schema=False)
+    def _legacy_redirect():
+        return RedirectResponse("/legacy/")
+
+    app.mount("/legacy", StaticFiles(directory=WEB, html=True), name="legacy")
+    if (WEB / "m").exists():
+        app.mount("/m", StaticFiles(directory=WEB / "m", html=True), name="field-app")
+    app.mount("/assets", StaticFiles(directory=REACT / "assets"), name="react-assets")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def _spa(path: str):
+        """React routes (/admin/permissions, /notifications, ...) all load index.html; real files in dist are served as-is."""
+        from fastapi import Response
+        f = (REACT / path) if path else None
+        if f and f.is_file() and REACT in f.resolve().parents:
+            return FileResponse(f)
+        if path.startswith(("api/", "ws/", "media/", "archive/", "internal/")):
+            raise HTTPException(404)
+        return Response((REACT / "index.html").read_text(encoding="utf-8"), media_type="text/html", headers={"Cache-Control": "no-store"})
+elif WEB.exists():
     @app.get("/", include_in_schema=False)
     def _index():
-        """Console entry: assets carry the build version so a new build is never served from a stale browser cache."""
-        from fastapi import Response
-        html = (WEB / "index.html").read_text(encoding="utf-8")
-        v = settings.version
-        html = html.replace('href="styles.css"', f'href="styles.css?v={v}"').replace('src="app.js"', f'src="app.js?v={v}"')
-        return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
+        return _legacy_html()
 
     app.mount("/", StaticFiles(directory=WEB, html=True), name="web")

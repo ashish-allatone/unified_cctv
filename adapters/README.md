@@ -4,7 +4,7 @@ Talks to departmental VMS / NVR / gateways (ONVIF, RTSP templates, vendor REST, 
 
 | | |
 |---|---|
-| Image | `<OCIR>/uvp-adapters:1.9.10` (built with `docker build -f adapters/Dockerfile .` from the repository root) |
+| Image | `<OCIR>/uvp-adapters:2.0.0` (built with `docker build -f adapters/Dockerfile .` from the repository root) |
 | Command | `["python", "-m", "uvp.services.adapter_service"]` |
 | Code | `platform/uvp/services/adapter_service.py` (shared package `platform/uvp`; `src/main.py` is the entrypoint shim) |
 | Ports | 9100/tcp (/metrics) |

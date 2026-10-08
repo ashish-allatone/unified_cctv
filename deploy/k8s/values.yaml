@@ -4,10 +4,10 @@ namespace: unified-cctv
 # Images: one per service, built from <service>/Dockerfile (Jenkinsfile) and pushed to OCIR as
 #   <registry>/<tenancy-namespace>/uvp-<service>:<tag>      tag = VERSION file (or the git SHA)
 registry: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE
-tag: 1.9.10
-imageGpu: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-anpr-gpu:1.9.10
+tag: 2.0.0
+imageGpu: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-anpr-gpu:2.0.0
 imagePullSecret: ocir-pull        # kubectl create secret docker-registry ocir-pull --docker-server=ap-mumbai-1.ocir.io ...
-relayImage: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-relay:1.9.10   # or bluenviron/mediamtx:1.15.1-ffmpeg
+relayImage: ap-mumbai-1.ocir.io/TENANCY_NAMESPACE/uvp-relay:2.0.0   # or bluenviron/mediamtx:1.15.1-ffmpeg
 publicHost: cctv.example.gov.in
 storageClass: standard
 # Managed / HA data services (see docs/ha.md): the platform never runs these itself in production

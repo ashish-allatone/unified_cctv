@@ -5,7 +5,7 @@ console, records segments for recorded cameras, and accepts key-authenticated RT
 
 | | |
 |---|---|
-| Image | `bluenviron/mediamtx:1.15.1-ffmpeg` (upstream) or `<OCIR>/uvp-relay:1.9.10` (this Dockerfile = upstream + `mediamtx.yml`) |
+| Image | `bluenviron/mediamtx:1.15.1-ffmpeg` (upstream) or `<OCIR>/uvp-relay:2.0.0` (this Dockerfile = upstream + `mediamtx.yml`) |
 | Ports | 8554/tcp RTSP · 8889/tcp WebRTC signalling · 8189/udp+tcp WebRTC media · 8888/tcp HLS · 9997/tcp control API (internal) · 9996/tcp playback API (internal) · 9998/tcp metrics |
 | Env | `MTX_AUTHHTTPADDRESS=http://api:8000/internal/relay-auth`, `MTX_PATHDEFAULTS_RECORDPATH=/recordings/<pod>/%path/%Y-%m-%d_%H-%M-%S-%f`, `TZ=UTC`, `RELAY_INTERNAL_USER/PASS` (same values as the platform services), optional `MTX_WEBRTCADDITIONALHOSTS=<public IP/DNS>` |
 | Health | `GET :9997/v3/paths/list` (control API) or `GET :9998/metrics` |

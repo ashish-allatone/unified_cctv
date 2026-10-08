@@ -4,7 +4,7 @@ Consumes plate events from Kafka, writes PostgreSQL rows, Elasticsearch document
 
 | | |
 |---|---|
-| Image | `<OCIR>/uvp-indexer:1.9.10` (built with `docker build -f indexer/Dockerfile .` from the repository root) |
+| Image | `<OCIR>/uvp-indexer:2.0.0` (built with `docker build -f indexer/Dockerfile .` from the repository root) |
 | Command | `["python", "-m", "uvp.services.indexer"]` |
 | Code | `platform/uvp/services/indexer.py` (shared package `platform/uvp`; `src/main.py` is the entrypoint shim) |
 | Ports | 9100/tcp (/metrics) |
