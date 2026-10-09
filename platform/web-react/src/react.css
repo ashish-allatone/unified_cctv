@@ -69,6 +69,25 @@ nav#tabs > div { display: contents; }
   color: var(--accent);
 }
 
+/* Smooth transitions for sidebar navigation and collapse */
+#app {
+  transition: grid-template-columns 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar {
+  transition: width 0.28s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: width;
+}
+
+.sidebar .brand,
+.sidebar .brand .name,
+nav#tabs .group,
+nav#tabs a span:not(.badge),
+.admin-nav-main-link > span.nav-main-text,
+.admin-toggle-badge {
+  transition: opacity 0.22s cubic-bezier(0.4, 0, 0.2, 1), transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .admin-toggle-badge {
   margin-left: auto;
   width: 22px;
@@ -81,7 +100,7 @@ nav#tabs > div { display: contents; }
   color: var(--muted);
   border: 1px solid var(--line);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
 }
 
@@ -100,6 +119,24 @@ nav#tabs > div { display: contents; }
 .toggle-svg-ico {
   width: 13px;
   height: 13px;
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.admin-toggle-badge.open .toggle-svg-ico {
+  transform: rotate(90deg);
+}
+
+@keyframes submenuExpand {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    max-height: 480px;
+    transform: translateY(0);
+  }
 }
 
 /* Sidebar Nested Sub-menu */
@@ -110,6 +147,8 @@ nav#tabs > div { display: contents; }
   display: flex;
   flex-direction: column;
   gap: 3px;
+  overflow: hidden;
+  animation: submenuExpand 0.24s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .admin-subcat-wrapper {
