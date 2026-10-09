@@ -281,3 +281,32 @@ been archived to cold storage and are not searched here.
   accept the comma-separated list.
 - **Multi-camera → Plate (optional)**: narrow the multi-camera list to a plate or pattern (`GJ01*`, `*1234`);
   needs `plate_search`.
+
+## Playback: custom time range as one video
+
+Recording is unchanged: the relay writes 60 s segments (`RECORD_SEGMENT_S`) and the archiver copies them to object
+storage. In **Playback**, choose a camera and a **From / To** time (or a quick range such as *Last 15 min*):
+
+- **Show recordings** lists every segment in the range, how much of the range is recorded, and any gaps.
+- **Play combined video** joins the segments into one MP4, trimmed to the chosen times, and plays it.
+- **Download combined video** saves the same file, named `<camera>_<from>_to_<to>_IST.mp4` (needs the *export* permission).
+
+The segments are joined without re-encoding, so preparing a video takes seconds, and the cut starts on the nearest
+key frame at or before *From*. Where the camera was not recording, the recorded parts are joined back to back.
+The combined file is kept in object storage under `playback/<department>/<camera>/<from_unix>-<to_unix>-<sig>.mp4`
+and reused if the same range is asked for again.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `PLAYBACK_MAX_RANGE_S` | `14400` (4 h) | Longest range one combined video may cover |
+| `PLAYBACK_KEEP_H` | `24` | Combined videos are deleted from object storage after this many hours |
+| `PLAYBACK_JOBS` | `2` | Combined videos built at the same time per API replica |
+
+API (`from` / `to` take a Unix timestamp in seconds or milliseconds, or ISO 8601):
+
+```
+GET  /api/cameras/{id}/recordings/range?from=1791520200&to=1791522000
+POST /api/cameras/{id}/recordings/combine            {"from": 1791520200, "to": 1791522000}  -> {name, status}
+GET  /api/cameras/{id}/recordings/combined/{name}/status
+GET  /api/cameras/{id}/recordings/combined/{name}    (add ?download=1 to save it)
+```

@@ -13,6 +13,7 @@
   /api/audit                    who did what (admin)
   /api/events/{id}/clip         playable link to the archived event clip (object storage)
   /api/cameras/{id}/recordings  archived segments of a recorded camera for one day
+  /api/cameras/{id}/recordings/range | combine | combined/{name}   custom time range as one video (routes_playback)
   /api/archive/stats            what the archive holds, per department
   /archive/{key}                serves archive objects when OBJECT_STORAGE=local
   /internal/events              ANPR -> indexer (no-Kafka mode)
@@ -1469,6 +1470,7 @@ from .routes_devices import router as devices_router  # noqa: E402
 from .routes_ops2 import router as ops2_router  # noqa: E402
 from .routes_corridors import router as corridors_router  # noqa: E402
 from .routes_perms import router as perms_router  # noqa: E402
+from .routes_playback import router as playback_router  # noqa: E402
 app.include_router(investigation_router)
 app.include_router(analytics_router)
 app.include_router(ops_router)
@@ -1480,6 +1482,7 @@ app.include_router(devices_router)
 app.include_router(ops2_router)
 app.include_router(corridors_router)
 app.include_router(perms_router)
+app.include_router(playback_router)
 
 
 # ----------------------------------------------------------------------------- web UI

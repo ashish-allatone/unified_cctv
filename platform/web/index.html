@@ -197,12 +197,28 @@
     <div class="view-head"><div><h2>Playback</h2><p>Archived recordings and bookmarks, streamed from object storage.</p></div></div>
     <form id="pb-form" class="panel search-form">
       <label>Camera <select name="camera" id="pb-camera"></select></label>
-      <label>Day (UTC) <input name="day" type="date"></label>
-      <button class="btn primary">List recordings</button>
-      <span class="muted small" id="pb-note">Recorded cameras only (RECORD_MODE). Segments are stored in object storage and streamed from there.</span>
+      <label>From (IST) <input name="from" type="datetime-local" step="1" required></label>
+      <label>To (IST) <input name="to" type="datetime-local" step="1" required></label>
+      <button class="btn primary">Show recordings</button>
+      <span class="pb-quick" id="pb-quick">
+        <button type="button" class="btn ghost small" data-min="5">Last 5 min</button>
+        <button type="button" class="btn ghost small" data-min="15">Last 15 min</button>
+        <button type="button" class="btn ghost small" data-min="30">Last 30 min</button>
+        <button type="button" class="btn ghost small" data-min="60">Last 1 hour</button>
+        <button type="button" class="btn ghost small" data-min="120">Last 2 hours</button>
+      </span>
+      <span class="muted small" id="pb-note">Pick any time range: it plays and downloads as one combined video. Recorded cameras only (RECORD_MODE).</span>
     </form>
     <div class="panel">
       <div class="panel-head"><h3 id="pb-title">Recordings</h3><span class="muted small" id="pb-sub"></span></div>
+      <div class="pb-combined hidden" id="pb-combined">
+        <div><span id="pb-summary"></span><div class="small muted" id="pb-gaps"></div></div>
+        <div class="pb-actions">
+          <button type="button" class="btn primary" id="pb-play-all">&#9654; Play combined video</button>
+          <button type="button" class="btn" id="pb-download-all">&#11015; Download combined video</button>
+          <span class="small muted" id="pb-progress" role="status"></span>
+        </div>
+      </div>
       <table class="table" id="pb-table"><thead><tr><th>Start (IST)</th><th>Length</th><th>Size</th><th></th></tr></thead><tbody></tbody></table>
     </div>
     <form id="bm-form" class="panel search-form">

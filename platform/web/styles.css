@@ -472,3 +472,8 @@ select[multiple] { min-height: 70px; }
 .campick-item { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; }
 .campick-item:hover, .campick-item.on { background: var(--panel2); }
 .campick-item input { width: 16px; height: 16px; min-height: 0; accent-color: var(--accent); }
+
+/* playback: custom time range -> one combined video */
+.pb-quick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pb-combined { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); font-size: 13px; }
+.pb-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

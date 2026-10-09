@@ -109,6 +109,10 @@ function route(method, p, q, body) {
     if ((r = m(/^\/api\/registry\/([^/]+)\/history$/))) return { camera: { name: camName(r[1]), created_by: "adapter" }, changes: [], status: [] };
     if ((r = m(/^\/api\/registry\/([^/]+)$/))) return CAMS.find((c) => c.id === r[1]);
     if ((r = m(/^\/api\/cameras\/([^/]+)\/recordings$/))) return { camera_id: r[1], day: q.get("day"), count: 0, segments: [] };
+    if ((r = m(/^\/api\/cameras\/([^/]+)\/recordings\/range$/))) {
+      const a = +q.get("from"), b = +q.get("to"), iso = (u) => new Date(u * 1000).toISOString();
+      return { camera_id: r[1], from: iso(a), to: iso(b), from_unix: a, to_unix: b, count: 0, requested_s: b - a, recorded_s: 0, bytes: 0, gaps: [], segments: [] };
+    }
     if ((r = m(/^\/api\/events\/([^/]+)\/clip$/))) return { status: "none" };
     if (m(/^\/api\/persons\/[^/]+\/sightings$/)) return [];
     return undefined;

@@ -328,3 +328,8 @@ nav#tabs button.active svg { opacity: 1; color: var(--accent); }
 .brand-lg .login-logo { height: 58px; width: auto; max-width: 100%; margin: 0 auto 6px; display: block; }
 .brand-lg:has(.login-logo) { justify-content: center; }
 #app.rail .sidebar .brand .logo-img { margin-right: 0; }
+
+/* playback: custom time range -> one combined video */
+.pb-quick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pb-combined { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel2); font-size: 13px; }
+.pb-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
