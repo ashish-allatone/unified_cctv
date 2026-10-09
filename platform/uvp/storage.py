@@ -10,6 +10,7 @@ Keys are laid out so that per-department retention is one prefix delete:
   recordings/<department>/<camera>/<profile>/<YYYY-MM-DD>/<start>.mp4
   clips/<department>/<camera>/<YYYY-MM-DD>/<event>.mp4
   crops/<department>/<camera>/<YYYY-MM-DD>/<event>_plate.jpg
+  playback/<department>/<camera>/<from_unix>-<to_unix>-<sig>.mp4   combined playback of a time range (short-lived)
 """
 from __future__ import annotations
 
@@ -60,6 +61,25 @@ class LocalStore:
     def local_path(self, key: str) -> Path | None:
         p = self._p(key)
         return p if p.exists() else None
+
+    def get_bytes(self, key: str) -> bytes | None:
+        p = self._p(key)
+        return p.read_bytes() if p.exists() else None
+
+    def open_stream(self, key: str, chunk: int = 1 << 20) -> tuple[Iterator[bytes], int] | None:
+        """(chunk iterator, size) of one object, or None when it is missing."""
+        p = self._p(key)
+        if not p.exists():
+            return None
+
+        def it():
+            with p.open("rb") as f:
+                while True:
+                    b = f.read(chunk)
+                    if not b:
+                        return
+                    yield b
+        return it(), p.stat().st_size
 
     def list(self, prefix: str) -> Iterator[tuple[str, int, dt.datetime]]:
         base = self._p(prefix) if prefix else self.root
@@ -151,6 +171,28 @@ class S3Store:
 
     def local_path(self, key: str) -> Path | None:
         return None
+
+    def get_bytes(self, key: str) -> bytes | None:
+        try:
+            return self.client.get_object(Bucket=self.bucket, Key=self._k(key))["Body"].read()
+        except self.client.exceptions.ClientError:
+            return None
+
+    def download_file(self, key: str, dst: Path) -> bool:
+        """Download one object straight to disk (no presigned URL, not held in memory)."""
+        try:
+            self.client.download_file(self.bucket, self._k(key), str(dst))
+            return True
+        except Exception:  # noqa: BLE001  (ClientError / S3Transfer errors)
+            return False
+
+    def open_stream(self, key: str, chunk: int = 1 << 20) -> tuple[Iterator[bytes], int] | None:
+        """(chunk iterator, size) of one object, or None when it is missing."""
+        try:
+            o = self.client.get_object(Bucket=self.bucket, Key=self._k(key))
+        except self.client.exceptions.ClientError:
+            return None
+        return o["Body"].iter_chunks(chunk), int(o["ContentLength"])
 
     def list(self, prefix: str) -> Iterator[tuple[str, int, dt.datetime]]:
         pag = self.client.get_paginator("list_objects_v2")

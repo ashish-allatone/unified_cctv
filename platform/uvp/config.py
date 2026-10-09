@@ -192,6 +192,9 @@ class Settings:
     s3_url_ttl_s: int = int(_env("S3_URL_TTL_S", "900"))        # lifetime of presigned playback links
     record_mode: str = _env("RECORD_MODE", "anpr")              # none | anpr (ANPR cameras) | all
     record_segment_s: int = int(_env("RECORD_SEGMENT_S", "60"))
+    playback_max_range_s: int = int(_env("PLAYBACK_MAX_RANGE_S", "14400"))   # longest time range one combined video may cover (4 h)
+    playback_keep_h: int = int(_env("PLAYBACK_KEEP_H", "24"))                 # combined videos are deleted from object storage after this
+    playback_jobs: int = int(_env("PLAYBACK_JOBS", "2"))                      # combined videos built at once per API replica
     record_local_keep: str = _env("RECORD_LOCAL_KEEP", "6h")    # relay disk buffer before segments are dropped
     recordings_dir: Path = Path(_env("RECORDINGS_DIR", str(ROOT / "data" / "recordings")))
     relay_playback: str = _env("RELAY_PLAYBACK", "http://localhost:9996")

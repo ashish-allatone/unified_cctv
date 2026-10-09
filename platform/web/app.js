@@ -1151,10 +1151,11 @@ async function openClip(eid) {
   if (c.status === "none") return toast("No recording for this camera at that time (camera not in RECORD_MODE or analysed from a file)", "warn");
   playArchive(c.url, `${c.plate} · ${S.camById[c.camera_id]?.name || c.camera_id} · ${fmtTime(c.ts)}`);
 }
-function playArchive(url, title) {
+function playArchive(url, title, download) {
   const src = url.startsWith("http") ? url : withTok(url);
+  const dl = download ? ` <a class="btn ghost small" href="${esc(withTok(download.url))}" download="${esc(download.filename)}">Download this video</a>` : "";
   modal(`<h3>${esc(title)}</h3><video controls autoplay playsinline style="width:min(90vw,960px);max-height:70vh;background:#000" src="${esc(src)}"></video>
-    <p class="small muted">Streamed from the video archive (object storage). This access is written to the audit log.</p>`);
+    <p class="small muted">Streamed from the video archive (object storage). This access is written to the audit log.${dl}</p>`);
 }
 
 // ------------------------------------------------------------------ playback (archived recordings)
@@ -1163,7 +1164,16 @@ async function loadPlayback() {
   if (!sel.options.length) {
     const opts = S.cameras.map((c) => `<option value="${esc(c.id)}">${esc(c.department)} · ${esc(c.name)}</option>`).join("");
     sel.innerHTML = opts; $("#bm-camera").innerHTML = opts;
-    $("#pb-form").day.value = new Date().toISOString().slice(0, 10);
+    const f = $("#pb-form"), t = new Date();
+    f.to.value = pbLocal(t); f.from.value = pbLocal(new Date(t.getTime() - 15 * 60000));
+    $$("#pb-quick [data-min]").forEach((b) => b.onclick = () => {
+      const n = new Date();
+      f.to.value = pbLocal(n); f.from.value = pbLocal(new Date(n.getTime() - +b.dataset.min * 60000));
+      runPlayback();
+    });
+    $("#pb-play-all").onclick = () => pbCombined("play");
+    $("#pb-download-all").onclick = () => pbCombined("download");
+    $("#pb-download-all").classList.toggle("hidden", !has("export"));
   }
   loadBookmarks();
 }
@@ -1423,16 +1433,62 @@ async function nearestAt(lat, lon) {
   L.circleMarker([lat, lon], { radius: 7, color: "#ef4444", fillOpacity: 0.9 }).addTo(MAP.marks);
   $("#map-nearest").innerHTML = `Incident at ${lat.toFixed(5)}, ${lon.toFixed(5)}: ` + r.cameras.map((c) => `<span class="tagchip ${c.covers_point ? "watchlist" : ""}" title="${c.covers_point ? "point is inside this camera's coverage" : "nearby but not covering the point"}">${esc(c.name)} ${c.distance_m} m${c.covers_point ? " ✓" : ""}</span>`).join(" ");
 }
+// custom time range: list the segments between two times; play / download them as ONE combined video
+const PB = { rec: null, busy: false };
+const pb2 = (n) => String(n).padStart(2, "0");
+const pbLocal = (d) => `${d.getFullYear()}-${pb2(d.getMonth() + 1)}-${pb2(d.getDate())}T${pb2(d.getHours())}:${pb2(d.getMinutes())}:${pb2(d.getSeconds())}`;
+const pbUnix = (v) => Math.floor(new Date(v).getTime() / 1000);
+const pbMB = (b) => `${(b / 1048576).toFixed(1)} MB`;
+function pbDur(sec) {
+  sec = Math.max(0, Math.round(sec)); const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = sec % 60;
+  return [h && `${h} h`, m && `${m} min`, (x || (!h && !m)) && `${x} s`].filter(Boolean).join(" ");
+}
 async function runPlayback(ev) {
   ev && ev.preventDefault();
   const f = $("#pb-form");
-  const r = await api(`/api/cameras/${encodeURIComponent(f.camera.value)}/recordings?day=${f.day.value}`);
+  if (!f.from.value || !f.to.value) return toast("Choose both a From and a To time");
+  const a = pbUnix(f.from.value), b = pbUnix(f.to.value);
+  if (!(b > a)) return toast("'To' must be later than 'From'");
+  let r;
+  try { r = await api(`/api/cameras/${encodeURIComponent(f.camera.value)}/recordings/range?from=${a}&to=${b}`); }
+  catch (e) { return toast(e.message); }
+  PB.rec = r;
+  const cam = S.camById[r.camera_id]?.name || r.camera_id;
   $("#pb-title").textContent = `${r.count} recorded segments`;
-  $("#pb-sub").textContent = `${S.camById[r.camera_id]?.name || r.camera_id} · ${r.day} (UTC day)`;
+  $("#pb-sub").textContent = `${cam} · ${fmtTime(r.from)} → ${fmtTime(r.to)}`;
+  $("#pb-combined").classList.toggle("hidden", !r.count);
+  $("#pb-summary").innerHTML = `<b>Recorded ${esc(pbDur(r.recorded_s))}</b> of the ${esc(pbDur(r.requested_s))} requested · about ${esc(pbMB(r.bytes))}`;
+  $("#pb-gaps").textContent = r.gaps.length ? `Not recorded: ${r.gaps.slice(0, 4).map((g) => `${fmtTime(g.from)} for ${pbDur(g.seconds)}`).join("; ")}${r.gaps.length > 4 ? `; and ${r.gaps.length - 4} more` : ""}. The combined video joins the recorded parts back to back.` : "";
   $("#pb-table tbody").innerHTML = r.segments.map((x) => `<tr><td>${esc(fmtTime(x.start))}</td><td>${Math.round(x.duration_s)} s</td>
     <td>${(x.bytes / 1048576).toFixed(1)} MB</td><td><button type="button" class="btn ghost small" data-url="${esc(x.url)}" data-start="${esc(x.start)}">Play</button></td></tr>`).join("")
-    || '<tr><td colspan="4" class="muted">No archived segments for this day. Recording only runs for cameras selected by RECORD_MODE (default: ANPR cameras).</td></tr>';
-  $$("[data-url]", $("#pb-table")).forEach((b) => b.onclick = () => playArchive(b.dataset.url, `${S.camById[r.camera_id]?.name || r.camera_id} · ${fmtTime(b.dataset.start)}`));
+    || '<tr><td colspan="4" class="muted">No recording for this camera in that time range. Recording only runs for cameras selected by RECORD_MODE (default: ANPR cameras), and the latest minute or two may not be archived yet.</td></tr>';
+  $$("[data-url]", $("#pb-table")).forEach((b) => b.onclick = () => playArchive(b.dataset.url, `${cam} · ${fmtTime(b.dataset.start)}`));
+}
+async function pbCombined(mode) {
+  const r = PB.rec;
+  if (!r || PB.busy) return;
+  const base = `/api/cameras/${encodeURIComponent(r.camera_id)}/recordings`;
+  const btns = [$("#pb-play-all"), $("#pb-download-all")], prog = $("#pb-progress");
+  PB.busy = true; btns.forEach((b) => b.disabled = true); prog.textContent = "Preparing video… queued";
+  try {
+    let j = await api(`${base}/combine`, { method: "POST", body: JSON.stringify({ from: r.from_unix, to: r.to_unix }) });
+    const name = j.name;
+    while (j.status === "queued" || j.status === "building") {
+      prog.textContent = `Preparing video… ${j.status === "queued" ? "queued" : (j.progress || 0) + "%"}`;
+      await new Promise((ok) => setTimeout(ok, 1500));
+      j = await api(`${base}/combined/${name}/status`);
+    }
+    if (j.status !== "ready") throw new Error(j.error || "Could not prepare the combined video");
+    if (mode === "download") {
+      const a = document.createElement("a");
+      a.href = withTok(j.download_url); a.download = j.filename; document.body.appendChild(a); a.click(); a.remove();
+      toast(`Downloading ${j.filename} (${pbMB(j.bytes)})`, "ok");
+    } else {
+      playArchive(j.url, `${S.camById[r.camera_id]?.name || r.camera_id} · ${fmtTime(r.from)} → ${fmtTime(r.to)} · ${pbDur(j.duration_s)}`,
+        has("export") ? { url: j.download_url, filename: j.filename } : null);
+    }
+  } catch (e) { toast(e.message); }
+  finally { PB.busy = false; btns.forEach((b) => b.disabled = false); prog.textContent = ""; }
 }
 function bindPlates(root) {
   $$("[data-plate]", root).forEach((el) => el.onclick = () => traceVehicle(el.dataset.plate));
